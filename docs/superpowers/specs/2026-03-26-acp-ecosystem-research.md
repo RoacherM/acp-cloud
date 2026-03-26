@@ -17,14 +17,15 @@ Date: 2026-03-26
 4. **Configuration** — `session/set_mode`, `session/set_config_option`
 5. **Cancellation** — `session/cancel` (cooperative, notification-based)
 
-### Streaming Events (session/update variants)
+### Streaming Events (session/update variants — aligned with SDK SessionUpdate union)
 | Event | Description |
 |---|---|
 | `agent_message_chunk` | Streaming text from agent |
+| `agent_thought_chunk` | Streaming agent reasoning/thinking |
 | `user_message_chunk` | Echoed user message |
 | `tool_call` | Initial tool call (pending status) |
-| `tool_call_update` | Progress/completion of tool call |
-| `tool_result` | Final tool result |
+| `tool_call_update` | Progress/completion of tool call (NOTE: tool results delivered here as status: completed, not as separate tool_result) |
+| `usage_update` | Token usage information |
 | `plan` | Full plan with entries (replaces previous) |
 | `config_option_update` | Agent-initiated config change |
 | `current_mode_update` | Agent-initiated mode change |
@@ -35,7 +36,8 @@ Date: 2026-03-26
 - Agent sends `session/request_permission` before executing tools
 - Request contains `toolCall` details and `options[]` with `kind`: allow_once, allow_always, reject_once, reject_always
 - Client responds with selected option or `cancelled`
-- Tool kinds: read, edit, delete, move, search, execute, think, fetch, other
+- Tool kinds: read, edit, delete, move, search, execute, think, fetch, switch_mode, other
+- Tool call statuses: pending, in_progress, completed, failed (no cancelled — cancellation is run-level)
 
 ### Content Block Types
 - `text` (always supported), `image`, `audio` (capability-gated)

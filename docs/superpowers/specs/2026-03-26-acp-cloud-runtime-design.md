@@ -473,7 +473,12 @@ async function recoverSession(session: SessionRecord): Promise<void> {
 
   // 2. Attempt session/load (using acpSessionId, not runtime record id)
   try {
-    const result = await handle.connection.loadSession({ sessionId: session.acpSessionId });
+    // SDK LoadSessionRequest requires sessionId, cwd, and mcpServers
+    const result = await handle.connection.loadSession({
+      sessionId: session.acpSessionId,
+      cwd: session.cwd,
+      mcpServers: session.metadata.mcpServers ?? [],
+    });
     // Agent replays history via session/update notifications
     session.status = 'ready';
     session.pid = handle.pid;
@@ -519,11 +524,16 @@ async function recoverSession(session: SessionRecord): Promise<void> {
 }
 
 function isUnrecoverableError(err: unknown): boolean {
-  // Auth required (-32000), internal error (-32603)
   const code = (err as any)?.code;
-  return code === -32000 || code === -32603;
+  // Auth required is always unrecoverable
+  if (code === -32000) return true;
+  // -32002 (not found) is recoverable — session simply doesn't exist, fallback to new
+  // -32603 (internal error) is NOT blanket-unrecoverable: acpx treats some -32603 cases
+  // (empty history, adapter quirks) as recoverable. Only treat as unrecoverable if the
+  // error message indicates a truly fatal condition (e.g. "agent binary not found").
+  // Default: recoverable — prefer session continuity over strictness.
+  return false;
 }
-```
 ```
 
 ### 3.7 Session Store (Pluggable)
@@ -706,22 +716,20 @@ class SandboxedFsHandler {
     return this.realRoot;
   }
 
-  private async resolveWithinRoot(path: string): Promise<string> {
+  private async resolveWithinRoot(inputPath: string): Promise<string> {
     const root = await this.getRealRoot();
 
-    // Reject absolute paths outside root
-    if (isAbsolute(path) && !path.startsWith(root + '/') && path !== root) {
-      throw new Error(`Absolute path outside sandbox: ${path}`);
-    }
+    // Resolve to absolute (relative paths resolved against root)
+    const candidate = isAbsolute(inputPath) ? inputPath : resolve(root, inputPath);
 
-    // Resolve to absolute, then to real path (follows symlinks)
-    const candidate = isAbsolute(path) ? path : resolve(root, path);
+    // Follow symlinks to get the true filesystem location
     const realCandidate = await realpath(candidate);
 
-    // Check relative path doesn't escape root
+    // Single check: relative path from root must not escape
+    // This handles ALL cases: prefix collision, symlink escaping, absolute paths outside root
     const rel = relative(root, realCandidate);
     if (rel.startsWith('..') || isAbsolute(rel)) {
-      throw new Error(`Path escapes sandbox: ${path} → ${realCandidate}`);
+      throw new Error(`Path escapes sandbox: ${inputPath} → ${realCandidate}`);
     }
 
     return realCandidate;
