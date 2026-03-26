@@ -53,7 +53,7 @@ export class MemorySessionStore implements SessionStore {
       ) {
         const updated: SessionRecord = { ...record, status: 'terminated' };
         this.map.set(id, updated);
-        reaped.push(copyRecord(updated));
+        reaped.push(updated);
       }
     }
 

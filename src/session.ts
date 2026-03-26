@@ -7,6 +7,7 @@ import { sessionUpdateToRunEvent } from './events.js';
 import type {
   SessionRecord,
   SessionStore,
+  SessionStatus,
   PermissionMode,
   NonInteractivePolicy,
   RecoveryPolicy,
@@ -51,12 +52,18 @@ export class Session {
     this.permissionController = permissionController;
   }
 
-  get status(): string {
+  get status(): SessionStatus {
     return this.record.status;
   }
 
   get acpSessionId(): string {
     return this.record.acpSessionId;
+  }
+
+  private async setStatus(status: SessionStatus): Promise<void> {
+    this.record.status = status;
+    this.record.lastActivity = new Date();
+    await this.store.update(this.record);
   }
 
   /**
@@ -125,16 +132,13 @@ export class Session {
     const run = new Run(randomUUID());
 
     // Transition to 'running'
-    this.record.status = 'running';
-    this.record.lastActivity = new Date();
-    await this.store.update(this.record);
+    await this.setStatus('running');
 
     // Start prompt execution in the background (don't await)
     this.executePrompt(content, run).catch((err) => {
       // If the prompt fails, push an error and complete the run
       run.complete('cancelled');
-      this.record.status = 'ready';
-      this.store.update(this.record).catch(() => {});
+      this.setStatus('ready').catch(() => {});
     });
 
     return run;
@@ -172,9 +176,7 @@ export class Session {
     run.complete(response.stopReason);
 
     // Transition back to 'ready'
-    this.record.status = 'ready';
-    this.record.lastActivity = new Date();
-    await this.store.update(this.record);
+    await this.setStatus('ready');
   }
 
   /**
@@ -185,8 +187,6 @@ export class Session {
       this.pool.kill(this.handle);
       this.handle = null;
     }
-    this.record.status = 'terminated';
-    this.record.lastActivity = new Date();
-    await this.store.update(this.record);
+    await this.setStatus('terminated');
   }
 }

@@ -43,6 +43,10 @@ export class AgentPool {
     this.config = config;
   }
 
+  getAgentIds(): string[] {
+    return Object.keys(this.config.agents);
+  }
+
   async spawn(agentId: string): Promise<AgentHandle> {
     const def = this.config.agents[agentId];
     if (!def) {

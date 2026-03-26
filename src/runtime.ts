@@ -57,6 +57,10 @@ export class CloudRuntime {
     return session;
   }
 
+  listAgents(): string[] {
+    return this.pool.getAgentIds();
+  }
+
   async listSessions(): Promise<SessionRecord[]> {
     return this.store.list();
   }
@@ -66,9 +70,9 @@ export class CloudRuntime {
   }
 
   async shutdown(): Promise<void> {
-    for (const session of this.sessions.values()) {
-      await session.close();
-    }
+    await Promise.all(
+      Array.from(this.sessions.values()).map(s => s.close())
+    );
     this.sessions.clear();
     this.pool.killAll();
   }

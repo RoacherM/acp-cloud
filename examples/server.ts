@@ -25,7 +25,9 @@ function sendSSE(sessionId: string, event: string, data: unknown) {
   if (!clients) return;
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const res of clients) {
-    res.write(payload);
+    if (!res.destroyed) {
+      res.write(payload);
+    }
   }
 }
 
@@ -65,7 +67,7 @@ const server = createServer(async (req, res) => {
   try {
     // GET /agents
     if (method === 'GET' && path === '/agents') {
-      return json(res, 200, { agents: Object.keys(runtime['pool']['config'].agents) });
+      return json(res, 200, { agents: runtime.listAgents() });
     }
 
     // POST /sessions — create session

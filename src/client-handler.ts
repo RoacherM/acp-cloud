@@ -79,13 +79,18 @@ export class SandboxedFsHandler {
   }
 
   async writeTextFile(_sessionId: string, path: string, content: string): Promise<void> {
-    // Validate the target path first.
+    // 1. Validate the parent directory is within the sandbox BEFORE any fs mutation.
+    //    resolveWithinRoot handles non-existent paths via findExistingAncestor,
+    //    so we validate on dirname(candidate) which may partially exist.
     const root = await this.getRealRoot();
     const candidate = isAbsolute(path) ? path : resolve(root, path);
+    const parentDir = dirname(candidate);
+    await this.resolveWithinRoot(parentDir);
 
-    // Ensure parent directory exists before resolving (needed for phase 1 ancestor walk).
-    await mkdir(dirname(candidate), { recursive: true });
+    // 2. Now that we know the parent is within the sandbox, create directories.
+    await mkdir(parentDir, { recursive: true });
 
+    // 3. Resolve the full target path (now that parent exists) and write.
     const safePath = await this.resolveWithinRoot(path);
     await writeFile(safePath, content, 'utf-8');
   }

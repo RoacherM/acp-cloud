@@ -1,4 +1,4 @@
-import type { RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
+import type { RequestPermissionRequest, RequestPermissionResponse, PermissionOption } from '@agentclientprotocol/sdk';
 import type { PermissionMode, NonInteractivePolicy } from './types.js';
 
 const READ_KINDS = new Set(['read', 'search', 'think']);
@@ -10,6 +10,20 @@ export class PermissionController {
   ) {}
 
   /**
+   * Find the first option matching one of the given kinds, in priority order.
+   */
+  private findOption(
+    options: PermissionOption[],
+    ...kinds: PermissionOption['kind'][]
+  ): PermissionOption | undefined {
+    for (const kind of kinds) {
+      const found = options.find((o) => o.kind === kind);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  /**
    * Returns a response if the request can be auto-resolved, or null if delegation is needed.
    */
   async resolve(request: RequestPermissionRequest): Promise<RequestPermissionResponse | null> {
@@ -17,17 +31,13 @@ export class PermissionController {
 
     switch (this.mode) {
       case 'approve-all': {
-        const option =
-          options.find((o) => o.kind === 'allow_always') ??
-          options.find((o) => o.kind === 'allow_once');
+        const option = this.findOption(options, 'allow_always', 'allow_once');
         if (!option) return null;
         return { outcome: { outcome: 'selected', optionId: option.optionId } };
       }
 
       case 'deny-all': {
-        const option =
-          options.find((o) => o.kind === 'reject_once') ??
-          options.find((o) => o.kind === 'reject_always');
+        const option = this.findOption(options, 'reject_once', 'reject_always');
         if (!option) return null;
         return { outcome: { outcome: 'selected', optionId: option.optionId } };
       }
@@ -35,7 +45,7 @@ export class PermissionController {
       case 'approve-reads': {
         const kind = request.toolCall.kind;
         if (kind != null && READ_KINDS.has(kind)) {
-          const option = options.find((o) => o.kind === 'allow_once');
+          const option = this.findOption(options, 'allow_once', 'allow_always');
           if (!option) return null;
           return { outcome: { outcome: 'selected', optionId: option.optionId } };
         }
@@ -59,9 +69,7 @@ export class PermissionController {
 
       case 'deny': {
         const { options } = request;
-        const option =
-          options.find((o) => o.kind === 'reject_once') ??
-          options.find((o) => o.kind === 'reject_always');
+        const option = this.findOption(options, 'reject_once', 'reject_always');
         if (!option) {
           throw new Error(
             `No reject option available for non-interactive denial of tool call '${request.toolCall.toolCallId}'.`,
