@@ -110,17 +110,22 @@ Event                 Stream event          细粒度 SSE 事件（1:1 ACP sessi
 
 #### 资源回收优先级
 
-达到 `maxAgentProcesses` 上限时：
+两种上限触发不同的回收策略：
 
 ```
-回收优先级（最先回收）:
-  1. sleeping 状态，按空闲时长倒序（最久未用的先回收）
-  2. ready 状态，按空闲时长倒序（kill 进程 → 转为 sleeping）
+达到 maxAgentProcesses（进程槽满）:
+  回收目标：释放进程
+  1. ready 状态，按空闲时长倒序（kill 进程 → 转为 sleeping）
+  2. 无可回收 → 拒绝新 session（503）
+  ✗ sleeping 无进程，不参与进程槽回收
   ✗ 绝不回收：running / waking / recovering / creating / initializing
-```
 
-回收 sleeping session 只释放进程槽，记录保留，后续仍可 waking 恢复。
-无可回收 session 时拒绝新建（`503 Service Unavailable`）。
+达到 maxActiveSessions（session 记录满）:
+  回收目标：释放 session 记录
+  1. sleeping 状态，按空闲时长倒序（terminated，释放记录）
+  2. 无可回收 → 拒绝新 session（503）
+  ✗ 绝不终止有进程的活跃 session
+```
 
 #### 每 Session 串行，Session 间并行
 

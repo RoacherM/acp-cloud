@@ -319,24 +319,18 @@ const runtime = new CloudRuntime({
 });
 ```
 
-**When `maxAgentProcesses` is reached:**
+**When `maxAgentProcesses` is reached** (need to free a process slot):
 
-1. Evict by priority: sleeping sessions (idle longest first) → waking sessions (newest first)
-2. Evicted sleeping sessions stay as records (can be re-woken later when a slot opens)
+1. Evict `ready` sessions by idle time (longest idle first) → kill process → move to `sleeping`
+2. `sleeping` sessions have no process — they don't participate in process slot eviction
 3. If no evictable sessions exist → reject new session creation with `503 Service Unavailable`
+4. Never evict: `running`, `waking`, `recovering`, `creating`, `initializing`
 
-**When `maxActiveSessions` is reached:**
+**When `maxActiveSessions` is reached** (need to free a session record slot):
 
-1. Reject new session creation with `503 Service Unavailable`
-2. Existing sessions unaffected (no forced termination of active work)
-
-```typescript
-// Eviction order (most evictable first)
-type EvictionPriority =
-  | 'sleeping'      // 1st: sleeping, idle longest → process already dead, just free the slot
-  | 'ready'         // 2nd: ready but idle longest → kill process, move to sleeping
-  // Never evict: running, waking, recovering, creating, initializing
-```
+1. Evict `sleeping` sessions by idle time (longest idle first) → move to `terminated`
+2. If no sleeping sessions exist → reject new session creation with `503 Service Unavailable`
+3. Never forcibly terminate sessions with active processes
 
 #### 3.3.3 Per-Session Prompt Serialization
 
