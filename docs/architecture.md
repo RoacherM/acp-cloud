@@ -88,6 +88,44 @@ Event                 Stream event          细粒度 SSE 事件（1:1 ACP sessi
 
 ## 关键数据流
 
+### 0. Prompt 并发模型（单 Session 串行队列）
+
+**核心约束：一个 Session 同一时刻只有一个活跃 Run。**
+
+这是 ACP 协议的固有语义 —— `session/prompt` 是 request-response 对，agent 必须响应后才算 turn 结束。acpx、codex-acp、claude-agent-acp 均遵循此模型。
+
+```
+客户端 A                  云端运行时（串行队列）             Agent
+  │                           │                              │
+  │ POST prompt "修复登录"     │                              │
+  │──────────────────────────>│ enqueue → 队列为空 → 立即执行  │
+  │                           │ session/prompt ──────────────>│
+  │  SSE: 事件流...           │<─────────────────────────────│
+  │<──────────────────────────│                              │
+  │                           │                              │
+客户端 B                      │                              │
+  │ POST prompt "加个功能"     │                              │
+  │──────────────────────────>│ enqueue → 队列非空 → 排队等待  │
+  │  202 Accepted (queued)    │                              │
+  │<──────────────────────────│                              │
+  │                           │                              │
+  │                           │ run_complete (修复登录)       │
+  │                           │<─────────────────────────────│
+  │                           │                              │
+  │                           │ 出队 → 执行下一个             │
+  │                           │ session/prompt ──────────────>│
+  │  SSE: 事件流...           │<─────────────────────────────│
+  │<──────────────────────────│                              │
+```
+
+**规则：**
+- 队列深度上限：可配置（默认 8），超限返回 `429 Too Many Requests`
+- `POST /cancel` 作用于**当前活跃 run**（发送 ACP `session/cancel`）
+- 队列中的待执行 prompt 可通过 `DELETE /sessions/:id/queue/:runId` 移除
+- 客户端断开 SSE 不影响 run 执行（run 继续完成，结果写入 session 历史）
+
+---
+
 ### 1. 提示词 → 响应
 
 ```
@@ -95,7 +133,7 @@ Event                 Stream event          细粒度 SSE 事件（1:1 ACP sessi
   │                         │                           │
   │ POST /sessions/:id/     │                           │
   │      prompt             │                           │
-  │────────────────────────>│                           │
+  │────────────────────────>│ 入队 → 队列空 → 立即执行   │
   │                         │ session/prompt             │
   │                         │─────────────────────────>│
   │                         │                           │
@@ -134,13 +172,18 @@ Event                 Stream event          细粒度 SSE 事件（1:1 ACP sessi
   │                         │                           │
   │ POST /permissions/      │                           │
   │      :reqId             │                           │
-  │  {optionId: "allow"}    │                           │
-  │────────────────────────>│                           │
-  │                         │ respond: allow_once        │
+  │  {optionId: "opt_3a7x"} │  ← opaque token，原样     │
+  │────────────────────────>│    回传 agent 下发的 ID    │
+  │                         │                           │
+  │                         │ respond(optionId)          │
   │                         │─────────────────────────>│
   │                         │                           │
   │                         │ (agent 继续执行工具)       │
 ```
+
+**重要：** `optionId` 是 agent 下发的 opaque token，客户端必须原样回传，不做本地语义推断。
+每个 agent 的 option ID 格式和含义可能不同 —— 语义信息在 `option.name` 和 `option.kind` 中，
+但最终响应只需要传 `optionId` 字符串。
 
 ### 3. 崩溃恢复
 
@@ -178,14 +221,19 @@ GET /agents
   ▼
 分发解析器 (DistributionResolver)
   ├── npx:    command='npx', args=['-y', package, ...args]
-  ├── uvx:    command='uvx', args=['run', package, ...args]
-  └── binary: 下载 + SHA256 校验 → 缓存路径
+  │           （npm registry 提供内置完整性校验）
+  ├── uvx:    command='uvx', args=[package, ...args]
+  │           （命令模板可配置，不硬编码子命令）
+  └── binary: HTTPS 下载 → 可选 checksum 校验 → 缓存路径
   │
   ▼
 Agent 安装器 (AgentInstaller)
   ├── 按 OS/arch 匹配二进制包
   ├── 下载到 ~/.acp-cloud-runtime/agents/<id>/<version>/
-  └── 校验 SHA256
+  └── 校验策略：
+      ├── 优先：registry 提供 checksum 时做 SHA256 校验
+      ├── 回退：registry 无 checksum（当前现状）→ 信任 HTTPS transport
+      └── 可选：配置 trusted mirror 或 sidecar checksums 文件
   │
   ▼
 child_process.spawn(command, args)
@@ -207,18 +255,50 @@ initialize → session/new → 就绪
                                             │
                                             ▼
                    prompt              [ready] ◄───────────── [recovering]
-                     │                    ▲                        ▲
-                     ▼                    │ run complete           │
-                [running]  ───────────────┘                       │
-                     │                              respawn +     │
-                     │ 进程死亡                    session/load    │
-                     ▼                        或 fallback-new     │
-                [crashed] ───────────────────────────────────────┘
+                     │                    ▲  ▲                      ▲
+                     ▼                    │  │ spawn + session/load  │
+                [running]  ───────────────┘  │                      │
+                     │         run complete   │                     │
+                     │                   [waking]                   │
+                     │                       ▲                      │
+                     │                       │ 收到新 prompt         │
+                     │                       │                      │
+                     │                  [sleeping]                  │
+                     │                       ▲                      │
+                     │                       │ TTL 到期              │
+                     │                       │ (进程回收,记录保留)    │
+                     │                       │                      │
+                     │              [ready] ─┘                      │
+                     │                                              │
+                     │ 进程死亡（非预期）              respawn +     │
+                     ▼                           session/load       │
+                [crashed] ─────────────────── 或 fallback-new ─────┘
                      │
                      │ 恢复失败（不可恢复错误 或 strict-load 模式）
                      ▼
                 [terminated]
 ```
+
+**状态说明：**
+
+| 状态 | 进程存活 | 记录保留 | 说明 |
+|------|---------|---------|------|
+| creating | 启动中 | 是 | spawn 进程 |
+| initializing | 是 | 是 | ACP initialize + session/new |
+| ready | 是 | 是 | 空闲，可接受 prompt |
+| running | 是 | 是 | 正在执行 prompt turn |
+| sleeping | **否** | 是 | TTL 到期后进程已回收，仅保留记录 |
+| waking | 启动中 | 是 | 收到新 prompt，重新 spawn + session/load |
+| crashed | 否 | 是 | 非预期死亡，等待恢复 |
+| recovering | 启动中 | 是 | respawn + session/load 或 fallback-new |
+| terminated | 否 | 归档 | 不可恢复，或用户主动关闭 |
+
+**TTL 与休眠策略：**
+- `ready` 状态空闲超过 `sessionTTL`（默认 300s，对齐 acpx）→ 进入 `sleeping`
+- `sleeping` 时进程已被 kill，SessionRecord 保留（含 acpSessionId）
+- 新 prompt 到达 sleeping session → `waking` → spawn + session/load → `ready` → 执行
+- `waking` 与 `recovering` 共享恢复路径，区别仅在触发原因（预期 vs 非预期）
+- sleeping session 超过 `sleepTTL`（可配置，默认 24h）→ `terminated`
 
 ## 三层会话 ID 模型
 

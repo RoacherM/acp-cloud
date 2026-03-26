@@ -148,7 +148,7 @@ The ACP registry has three distribution types (npx, binary, uvx) with OS-specifi
 // Registry entry distribution types (from actual registry schema)
 type RegistryDistribution =
   | { type: 'npx'; package: string; args?: string[] }
-  | { type: 'binary'; archives: Record<Platform, { url: string; sha256: string }> }
+  | { type: 'binary'; archives: Record<Platform, { url: string; sha256?: string }> }
   | { type: 'uvx'; package: string; args?: string[] };
 
 type Platform = 'darwin-arm64' | 'darwin-x64' | 'linux-arm64' | 'linux-x64' | 'win32-x64';
@@ -177,11 +177,17 @@ interface AgentInstaller {
 
 **Resolution rules by distribution type:**
 
-| Distribution | Resolution |
-|---|---|
-| `npx` | `command: 'npx'`, `args: ['-y', package, ...entry.args]` |
-| `uvx` | `command: 'uvx'`, `args: ['run', package, ...entry.args]` |
-| `binary` | Download + verify for current OS/arch → `command: cachedBinaryPath`, `args: entry.args` |
+| Distribution | Resolution | Integrity |
+|---|---|---|
+| `npx` | `command: 'npx'`, `args: ['-y', package, ...entry.args]` | npm registry built-in integrity (HTTPS + package-lock) |
+| `uvx` | `command: 'uvx'`, `args: [package, ...entry.args]` (template configurable, no hardcoded subcommand) | PyPI built-in integrity |
+| `binary` | Download for current OS/arch → `command: cachedBinaryPath`, `args: entry.args` | HTTPS required; SHA256 if registry provides it; otherwise trust transport |
+
+**Binary verification strategy:** Current ACP registry does not include `sha256` fields. The resolver follows a fallback chain:
+1. Registry provides checksum → verify SHA256
+2. Registry has no checksum (current state) → trust HTTPS transport security
+3. Operator provides sidecar checksums file → verify against it
+This is a pragmatic choice — npx/uvx already handle their own integrity; binary is the only case that needs explicit policy.
 
 **Fallback chain:** Manual `AgentDefinition` in config → Registry auto-resolve → Error (agent not found).
 
@@ -233,18 +239,31 @@ await session.close();
                                           │
                                           ▼
                  prompt              [ready] ◄──────────── [recovering]
-                   │                    ▲                       ▲
-                   ▼                    │ run complete          │ respawn + session/load
-              [running]  ───────────────┘                      │
-                   │                                           │
-                   │ process death detected                    │
-                   ▼                                           │
-              [crashed] ──────────────────────────────────────┘
+                   │                  ▲  ▲                      ▲
+                   ▼                  │  │ spawn+session/load    │
+              [running] ──────────────┘  │                      │
+                   │       run complete  [waking]                │
+                   │                      ▲                     │
+                   │                      │ new prompt           │
+                   │                 [sleeping]                  │
+                   │                      ▲                     │
+                   │                      │ TTL expired          │
+                   │                 [ready]─┘                  │
+                   │                                            │
+                   │ process death (unexpected)                 │
+                   ▼                                            │
+              [crashed] ───── respawn + recovery ──────────────┘
                    │
-                   │ recovery failed
+                   │ recovery failed / unrecoverable
                    ▼
               [terminated]
 ```
+
+**Sleeping/waking lifecycle:**
+- `ready` idle for `sessionTTL` (default 300s, aligned with acpx) → `sleeping`: process killed, record preserved
+- New prompt arrives at `sleeping` session → `waking`: respawn + `session/load` → `ready` → execute
+- `waking` shares recovery path with `recovering` (difference is trigger: expected vs unexpected)
+- `sleeping` for longer than `sleepTTL` (configurable, default 24h) → `terminated`
 
 **Session Record (persisted to SessionStore):**
 
@@ -265,7 +284,7 @@ interface SessionRecord {
   agentModeId: string | null;               // ACP agent mode (from session/set_mode)
   recoveryPolicy: RecoveryPolicy;           // How to handle session/load failure
 
-  status: 'creating' | 'initializing' | 'ready' | 'running' | 'crashed' | 'recovering' | 'terminated';
+  status: 'creating' | 'initializing' | 'ready' | 'running' | 'sleeping' | 'waking' | 'crashed' | 'recovering' | 'terminated';
   pid: number | null;
   createdAt: Date;
   lastActivity: Date;
@@ -273,7 +292,39 @@ interface SessionRecord {
 }
 ```
 
-### 3.3 Prompt / Run
+### 3.3 Prompt Concurrency Model
+
+**Core constraint: one active Run per Session at any time.**
+
+This is inherent to the ACP protocol — `session/prompt` is a request-response pair, and the agent must respond before the turn ends. acpx, codex-acp, and claude-agent-acp all enforce this.
+
+```typescript
+// Prompt queue behavior
+const run1 = await session.prompt([{ type: 'text', text: 'Fix login bug' }]);
+// run1 starts immediately (queue was empty)
+
+const run2 = session.enqueue([{ type: 'text', text: 'Add feature X' }]);
+// run2 is queued (run1 still active), returns immediately with status 'queued'
+// run2 starts automatically when run1 completes
+
+// Cancel active run
+await session.cancelActiveRun();  // sends ACP session/cancel
+
+// Remove queued (not yet active) run
+await session.dequeue(run2.id);
+```
+
+**Queue rules:**
+
+| Rule | Value | Rationale |
+|---|---|---|
+| Max queue depth | Configurable (default 8) | Prevent unbounded memory growth |
+| Queue full behavior | Reject with error | Backpressure to client |
+| `cancel()` target | Current active run only | ACP session/cancel semantics |
+| Client SSE disconnect | Run continues to completion | Results saved to session history |
+| Session enters `sleeping` | Queue drained, all runs complete | No orphaned work |
+
+### 3.4 Prompt / Run
 
 ```typescript
 // Send a prompt → get an async iterable of events
@@ -282,7 +333,7 @@ const run = await session.prompt([
 ]);
 
 // run.id → string
-// run.status → 'running'
+// run.status → 'running' | 'queued'
 
 // Consume events (async iterable)
 for await (const event of run) {
@@ -405,6 +456,8 @@ run.on('permission_request', async (req) => {
   // The HTTP layer (Layer 3) does this automatically via SSE + POST
 });
 ```
+
+**Important:** `optionId` is an **opaque token** provided by the agent. Clients must pass it back verbatim — do not infer semantics from the ID string. Semantic information is in `option.name` (display label) and `option.kind` (allow_once, allow_always, reject_once, reject_always). Each agent may use different ID formats.
 
 ### 3.5 Agent Pool
 
