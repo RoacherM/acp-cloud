@@ -88,11 +88,47 @@ Event                 Stream event          细粒度 SSE 事件（1:1 ACP sessi
 
 ## 关键数据流
 
-### 0. Prompt 并发模型（单 Session 串行队列）
+### 0. 并发模型
+
+#### 部署约束：单实例
+
+当前版本仅单实例部署。不做跨实例 session 迁移、分布式锁或 shared-nothing 集群。
+
+```
+总吞吐 = min(活跃会话并行数, maxAgentProcesses, 主机 CPU/内存瓶颈)
+```
+
+#### 全局资源上限
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `maxAgentProcesses` | 20 | 最大并发 agent 进程数（running + ready） |
+| `maxActiveSessions` | 50 | 最大非终止状态 session 数（含 sleeping） |
+| `sessionTTL` | 300s | 空闲 → sleeping |
+| `sleepTTL` | 24h | sleeping → terminated |
+| `maxQueueDepth` | 8 | 单 session prompt 队列上限 |
+
+#### 资源回收优先级
+
+达到 `maxAgentProcesses` 上限时：
+
+```
+回收优先级（最先回收）:
+  1. sleeping 状态，按空闲时长倒序（最久未用的先回收）
+  2. ready 状态，按空闲时长倒序（kill 进程 → 转为 sleeping）
+  ✗ 绝不回收：running / waking / recovering / creating / initializing
+```
+
+回收 sleeping session 只释放进程槽，记录保留，后续仍可 waking 恢复。
+无可回收 session 时拒绝新建（`503 Service Unavailable`）。
+
+#### 每 Session 串行，Session 间并行
 
 **核心约束：一个 Session 同一时刻只有一个活跃 Run。**
 
 这是 ACP 协议的固有语义 —— `session/prompt` 是 request-response 对，agent 必须响应后才算 turn 结束。acpx、codex-acp、claude-agent-acp 均遵循此模型。
+
+**不同 Session 完全并行。** Session A 的 run 不阻塞 Session B。每个 Session 有独立的 agent 进程和 `ClientSideConnection`。
 
 ```
 客户端 A                  云端运行时（串行队列）             Agent
@@ -341,6 +377,8 @@ CloudClient + React hooks    前端消费                          Web 应用集
 ```
 
 用户不需要了解 ACP 协议，不需要管理 agent 进程。只需调用标准 HTTP API。
+
+**边界：** 当前版本仅单实例，不做跨实例 session 迁移或分布式锁。
 
 ## 设计原则
 

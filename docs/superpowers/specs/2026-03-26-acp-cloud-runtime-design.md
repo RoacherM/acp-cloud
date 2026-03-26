@@ -292,11 +292,59 @@ interface SessionRecord {
 }
 ```
 
-### 3.3 Prompt Concurrency Model
+### 3.3 Concurrency Model
+
+#### 3.3.1 Deployment Constraint: Single Instance
+
+**The current version is single-instance only.** No cross-instance session migration, no distributed locking, no shared-nothing clustering. One Node.js process manages all sessions and agent processes on one host.
+
+**Throughput formula:**
+
+```
+总吞吐 = min(活跃会话并行数, maxAgentProcesses, 主机 CPU/内存瓶颈)
+```
+
+#### 3.3.2 Global Resource Limits
+
+```typescript
+const runtime = new CloudRuntime({
+  // Global limits (single instance)
+  maxAgentProcesses: 20,    // Max concurrent agent processes (running + ready)
+  maxActiveSessions: 50,    // Max sessions in any non-terminated state (including sleeping)
+
+  // Per-session defaults
+  sessionTTL: 300_000,      // 5 min idle → sleeping
+  sleepTTL: 86_400_000,     // 24h sleeping → terminated
+  maxQueueDepth: 8,         // Per-session prompt queue
+});
+```
+
+**When `maxAgentProcesses` is reached:**
+
+1. Evict by priority: sleeping sessions (idle longest first) → waking sessions (newest first)
+2. Evicted sleeping sessions stay as records (can be re-woken later when a slot opens)
+3. If no evictable sessions exist → reject new session creation with `503 Service Unavailable`
+
+**When `maxActiveSessions` is reached:**
+
+1. Reject new session creation with `503 Service Unavailable`
+2. Existing sessions unaffected (no forced termination of active work)
+
+```typescript
+// Eviction order (most evictable first)
+type EvictionPriority =
+  | 'sleeping'      // 1st: sleeping, idle longest → process already dead, just free the slot
+  | 'ready'         // 2nd: ready but idle longest → kill process, move to sleeping
+  // Never evict: running, waking, recovering, creating, initializing
+```
+
+#### 3.3.3 Per-Session Prompt Serialization
 
 **Core constraint: one active Run per Session at any time.**
 
 This is inherent to the ACP protocol — `session/prompt` is a request-response pair, and the agent must respond before the turn ends. acpx, codex-acp, and claude-agent-acp all enforce this.
+
+**Different sessions run in parallel.** Session A's run does not block Session B. Each session has its own agent process and `ClientSideConnection`.
 
 ```typescript
 // Prompt queue behavior
