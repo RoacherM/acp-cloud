@@ -887,12 +887,25 @@ acp-cloud-runtime/
 │       ├── routes.ts             # HTTP route handlers
 │       ├── sse.ts                # SSE connection manager
 │       └── middleware.ts         # Auth, CORS, error handling
+│   ├── cli/
+│   │   ├── index.ts              # CLI entry point (npx acp-cloud)
+│   │   ├── commands/
+│   │   │   ├── start.ts          # acp-cloud start
+│   │   │   └── prompt.ts         # acp-cloud prompt <agent> "..."
+│   │   └── config.ts             # Config file loader (acp-cloud.config.ts)
+│   └── client/
+│       ├── index.ts              # CloudClient class
+│       ├── stream.ts             # SSE event stream consumer
+│       └── react.ts              # React hooks (useSession, usePrompt)
+├── Dockerfile                    # Production container image
+├── docker-compose.yml            # Multi-agent + Postgres example
 ├── tests/
 │   ├── runtime.test.ts
 │   ├── session.test.ts
 │   ├── permission.test.ts
 │   ├── recovery.test.ts
-│   └── server.test.ts
+│   ├── server.test.ts
+│   └── client.test.ts
 └── examples/
     ├── basic-usage.ts            # Minimal Layer 2 example
     ├── http-server.ts            # Layer 3 server example
@@ -901,7 +914,159 @@ acp-cloud-runtime/
 
 ---
 
-## 9. MVP Scope
+## 9. Distribution Layer
+
+The core product value is: **deploy our server, users access agents via standard HTTP/SSE.** The distribution layer makes this trivially easy.
+
+### 9.1 CLI (`npx acp-cloud`)
+
+```bash
+# Start server with default config (reads acp-cloud.config.ts if present)
+npx acp-cloud start
+
+# Start with inline options
+npx acp-cloud start --agents claude,codex,gemini --port 3000
+
+# Quick single-prompt test (no server needed)
+npx acp-cloud prompt claude "Fix the login bug in auth.ts"
+
+# Show available agents from registry
+npx acp-cloud agents list
+```
+
+**Config file (`acp-cloud.config.ts`):**
+
+```typescript
+import { defineConfig } from 'acp-cloud-runtime';
+
+export default defineConfig({
+  port: 3000,
+  agents: {
+    claude: { command: 'npx', args: ['-y', '@zed-industries/claude-agent-acp'] },
+    codex: { command: 'npx', args: ['-y', '@zed-industries/codex-acp'] },
+  },
+  // Or auto-discover from registry:
+  registry: true,
+  allowlist: ['claude-acp', 'codex-acp', 'gemini', 'goose'],
+
+  sessionStore: { type: 'postgres', url: process.env.DATABASE_URL },
+  defaultPermissionMode: 'approve-reads',
+  sessionTTL: 300_000,
+});
+```
+
+### 9.2 Docker
+
+```dockerfile
+FROM node:22-slim
+RUN npm install -g acp-cloud-runtime
+EXPOSE 3000
+CMD ["acp-cloud", "start", "--port", "3000"]
+```
+
+```yaml
+# docker-compose.yml
+services:
+  acp-cloud:
+    image: acp-cloud-runtime
+    ports: ["3000:3000"]
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DATABASE_URL=postgres://postgres:postgres@db:5432/acp
+    volumes:
+      - ./workspace:/workspace
+      - ./acp-cloud.config.ts:/app/acp-cloud.config.ts
+    depends_on: [db]
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: acp
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
+```
+
+**One command to deploy:**
+
+```bash
+docker compose up
+# Server ready at http://localhost:3000
+# POST /api/sessions { agent: "claude", cwd: "/workspace" }
+```
+
+### 9.3 Client SDK
+
+Typed HTTP/SSE client for consuming the API from any JavaScript/TypeScript environment.
+
+```typescript
+import { CloudClient } from 'acp-cloud-runtime/client';
+
+const client = new CloudClient('http://localhost:3000');
+
+// List available agents
+const agents = await client.listAgents();
+
+// Create session + send prompt
+const session = await client.createSession({ agent: 'claude', cwd: '/workspace' });
+const run = await session.prompt([{ type: 'text', text: 'Fix the login bug' }]);
+
+for await (const event of run) {
+  if (event.type === 'agent_message_chunk') {
+    process.stdout.write(event.data.text);
+  }
+  if (event.type === 'permission_request') {
+    // Approve the first allow option
+    const allow = event.data.options.find(o => o.kind === 'allow_once');
+    await session.respondToPermission(event.data.requestId, allow.optionId);
+  }
+}
+```
+
+**React hooks:**
+
+```typescript
+import { useSession, usePrompt } from 'acp-cloud-runtime/client/react';
+
+function AgentChat() {
+  const session = useSession({ agent: 'claude', cwd: '/workspace' });
+  const { events, send, cancel, permissions } = usePrompt(session);
+
+  return (
+    <div>
+      {events.map(e => /* render based on event type */)}
+      {permissions.map(p => (
+        <PermissionDialog
+          key={p.requestId}
+          request={p}
+          onRespond={(optionId) => session.respondToPermission(p.requestId, optionId)}
+        />
+      ))}
+      <input onSubmit={(text) => send([{ type: 'text', text }])} />
+    </div>
+  );
+}
+```
+
+### 9.4 Integration Summary
+
+```
+部署方式                    命令                              适用场景
+──────────────────────────────────────────────────────────────────────
+npx acp-cloud start         一行命令                          本地开发、快速验证
+docker compose up            容器化                            生产部署
+createServer(runtime)        编程方式                          嵌入已有 Node 服务
+new CloudRuntime(config)     纯 SDK                           自定义服务框架
+CloudClient + React hooks    前端消费                          Web 应用集成
+```
+
+---
+
+## 10. MVP Scope
 
 ### Phase 1: Core Runtime (Week 1)
 
@@ -922,26 +1087,30 @@ acp-cloud-runtime/
 - Session TTL and idle cleanup
 - Test with `codex-acp` and `gemini`
 
-### Phase 3: HTTP/SSE Server (Week 3)
+### Phase 3: HTTP/SSE Server + CLI + Docker (Week 3)
 
 - All REST API endpoints
 - SSE event streaming
 - Permission bridge (SSE push → POST response)
 - Basic auth middleware
 - `PostgresSessionStore`
+- **CLI**: `npx acp-cloud start` with config file support
+- **CLI**: `npx acp-cloud prompt <agent> "..."` for quick testing
+- **Dockerfile** + **docker-compose.yml** (runtime + Postgres)
 - OpenAPI spec generation
 
-### Phase 4: Multi-Agent Validation (Week 4)
+### Phase 4: Client SDK + Multi-Agent Validation (Week 4)
 
+- **`CloudClient`**: typed HTTP/SSE client for consuming the API
+- **React hooks**: `useSession()`, `usePrompt()` for frontend integration
 - ACP registry integration (auto-discover agents)
 - Validate with 5+ different agents (Claude, Codex, Gemini, Goose, Cline)
 - Document per-agent quirks and compatibility notes
 - Performance benchmarks (session creation latency, event throughput)
-- Example frontend (React) consuming the API
 
 ---
 
-## 10. Future Considerations (Post-MVP)
+## 11. Future Considerations (Post-MVP)
 
 ### ACP Remote Transport
 When ACP standardizes HTTP/WebSocket transport, the Cloud Runtime could optionally expose sessions as ACP-over-HTTP endpoints, making it a true ACP proxy. This would allow ACP clients (like Zed) to connect to cloud-hosted agents through the runtime.
@@ -970,7 +1139,7 @@ Client → Cloud Proxy (routing + auth) → Permission Proxy → Agent
 
 ---
 
-## 11. Key Technical Decisions
+## 12. Key Technical Decisions
 
 | Decision | Choice | Rationale |
 |---|---|---|
@@ -985,7 +1154,7 @@ Client → Cloud Proxy (routing + auth) → Permission Proxy → Agent
 
 ---
 
-## 12. Design Decisions Log
+## 13. Design Decisions Log
 
 Decisions made during review, recorded for traceability.
 
@@ -998,7 +1167,7 @@ Decisions made during review, recorded for traceability.
 
 ---
 
-## 13. Risks and Mitigations
+## 14. Risks and Mitigations
 
 | Risk | Impact | Mitigation |
 |---|---|---|

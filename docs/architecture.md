@@ -321,6 +321,27 @@ initialize → session/new → 就绪
 └─────────────────────────────────────────────────────────┘
 ```
 
+## 分发形态
+
+核心价值：**部署我们的 server，用户通过标准 HTTP/SSE 访问后端 agent。**
+
+```
+部署方式                    命令                              适用场景
+──────────────────────────────────────────────────────────────────────
+npx acp-cloud start         一行命令                          本地开发、快速验证
+docker compose up            容器化                            生产部署
+createServer(runtime)        编程方式                          嵌入已有 Node 服务
+new CloudRuntime(config)     纯 SDK                           自定义服务框架
+CloudClient + React hooks    前端消费                          Web 应用集成
+```
+
+```
+用户/前端  ──HTTP/SSE──►  acp-cloud server  ──stdio/ACP──►  Agent 进程
+                          (我们的交付物)                     (Claude/Codex/Gemini...)
+```
+
+用户不需要了解 ACP 协议，不需要管理 agent 进程。只需调用标准 HTTP API。
+
 ## 设计原则
 
 | # | 原则 | 说明 |
