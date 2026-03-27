@@ -1,6 +1,8 @@
-// src/permission.ts
 import type { RequestPermissionRequest, RequestPermissionResponse, PermissionOption } from '@agentclientprotocol/sdk';
 import type { PermissionMode } from './types.js';
+
+/** ToolKind values considered read-only (auto-approved by approve-reads mode). */
+const READ_KINDS = new Set(['read', 'search', 'think', 'fetch']);
 
 export class PermissionController {
   constructor(private readonly mode: PermissionMode) {}
@@ -17,36 +19,43 @@ export class PermissionController {
   }
 
   /**
-   * Resolve a permission request based on the mode.
-   *
-   * Phase 1.5 behavior:
-   * - approve-all: auto-approve everything
-   * - approve-reads: degrades to deny-all (no interactive delegation)
-   * - deny-all: auto-reject everything
+   * Should this request be delegated to the external client?
+   */
+  shouldDelegate(request: RequestPermissionRequest): boolean {
+    switch (this.mode) {
+      case 'approve-all':
+      case 'deny-all':
+        return false;
+      case 'delegate':
+        return true;
+      case 'approve-reads': {
+        const kind = request.toolCall.kind;
+        if (kind && READ_KINDS.has(kind)) return false;
+        return true;
+      }
+    }
+  }
+
+  /**
+   * Auto-resolve a permission request (used for non-delegated requests).
    */
   resolve(request: RequestPermissionRequest): RequestPermissionResponse {
     const { options } = request;
 
     switch (this.mode) {
-      case 'approve-all': {
+      case 'approve-all':
+      case 'approve-reads': {
         const option = this.findOption(options, 'allow_always', 'allow_once');
         if (option) return { outcome: { outcome: 'selected', optionId: option.optionId } };
-        // Fallback: pick first option
         return { outcome: { outcome: 'selected', optionId: options[0].optionId } };
       }
 
       case 'deny-all':
-      case 'approve-reads': {
-        // Phase 1.5: approve-reads degrades to deny-all (no delegation path)
+      case 'delegate': {
         const option = this.findOption(options, 'reject_once', 'reject_always');
         if (option) return { outcome: { outcome: 'selected', optionId: option.optionId } };
-        // Fallback: pick first option
         return { outcome: { outcome: 'selected', optionId: options[0].optionId } };
       }
-
-      case 'delegate':
-        // Delegation is handled upstream by SessionController (Task 5)
-        throw new Error('PermissionController.resolve() must not be called in delegate mode');
     }
   }
 }
