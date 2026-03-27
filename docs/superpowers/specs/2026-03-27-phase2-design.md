@@ -2,7 +2,7 @@
 
 ## 1. Goal
 
-Make the ACP Cloud Runtime production-ready for Phase 3 (HTTP/SSE server) by adding durable session persistence, interactive permission delegation, and graceful run cancellation.
+Make the ACP Cloud Runtime production-ready for Phase 3 (HTTP/SSE server) by adding durable session persistence, interactive permission delegation, graceful run cancellation, and tightening the product boundary to match the refined MVP scope.
 
 ## 2. Scope
 
@@ -11,7 +11,7 @@ Three features plus one cleanup:
 1. **FileSessionStore** — JSON-per-session durable persistence
 2. **Permission delegation** — interactive `delegate` mode via EventHub; fix `approve-reads` to actually work
 3. **cancelRun** — graceful ACP `session/cancel`, session stays alive
-4. **Cleanup** — remove `mcpServers` from `CreateSessionOptions` and session creation path
+4. **Boundary cleanup** — remove `mcpServers` from session path; remove FS capability and `SandboxedFsHandler`; ensure capability negotiation reflects the narrowed product boundary
 
 ### Out of Scope (deferred)
 
@@ -20,17 +20,46 @@ Three features plus one cleanup:
 - Prompt queue / backpressure — concurrency optimization
 - Multi-agent validation — Phase 3+
 
-## 3. Design Principle: MCP Boundary
+## 3. Design Principle: Product Boundary
 
-**MCP servers are the agent's responsibility, not the runtime's.**
+**The runtime is a session lifecycle and event-streaming layer, not a full ACP environment client.**
 
-The runtime is a session lifecycle manager. Agents are self-contained — they configure, load, and recover their own MCP connections and tool context.
+The runtime owns: session creation, prompt execution, event streaming, permission delegation, cancellation, session shutdown, and lightweight metadata persistence.
 
-Implications:
+The runtime does NOT manage: MCP servers, client-side filesystem, terminal access, or conversation storage.
+
+### MCP Boundary
+
 - `CreateSessionOptions` does not expose `mcpServers`
-- `newSession()` / future `loadSession()` do not pass MCP config
+- `newSession()` passes `mcpServers: []` to satisfy ACP protocol shape (compatibility detail, not a product capability)
 - `SessionRecord` does not store MCP config
-- Agents that require client-provided `mcpServers` are not compatible with this runtime model
+- Agents that require runtime-provided `mcpServers` are not compatible with this runtime model
+
+### Client Capability Boundary
+
+- `fs`: NOT advertised. Runtime does not proxy filesystem operations. `SandboxedFsHandler` is removed.
+- `terminal`: NOT advertised. Explicitly `false`.
+- Agents that require `fs/read_text_file` or `terminal/create` callbacks are outside MVP compatibility.
+
+### Capability Negotiation After Cleanup
+
+```typescript
+clientCapabilities: {
+  fs: {},        // not advertised
+  terminal: false,
+}
+```
+
+### Compatibility Model
+
+This runtime is compatible with ACP agents that:
+- Work over stdio ACP
+- Do not require client-provided filesystem callbacks
+- Do not require terminal callbacks
+- Do not require runtime-managed MCP configuration
+- Can operate with the runtime's supported permission flow
+
+This is an intentional product decision, not a temporary limitation.
 
 ## 4. FileSessionStore
 
@@ -196,20 +225,47 @@ cancelRun(sessionId: string, runId?: string): Promise<void>
 - **Cancel during permission wait** → permissions cancelled first, then ACP cancel sent
 - **Agent ignores cancel** → prompt completes with whatever `StopReason` the agent returns; we don't force termination
 
-## 7. Cleanup: Remove mcpServers from Session Path
+## 7. Boundary Cleanup
 
-### Changes
+### Remove mcpServers from Session Path
 
 - `CreateSessionOptions`: remove `mcpServers` field
 - `SessionControllerOptions`: remove `mcpServers` field
-- `SessionController.create()`: stop passing `mcpServers` to `connection.newSession()`
-- `AgentPool.spawn()`: remove `mcpServers` from spawn path (already doesn't use it, but clean up any references)
-
-### newSession Call After Cleanup
+- `SessionController.create()`: pass `mcpServers: []` to `connection.newSession()` for protocol compatibility
 
 ```typescript
-const result = await handle.connection.newSession({ cwd: opts.cwd });
+const result = await handle.connection.newSession({
+  cwd: opts.cwd,
+  mcpServers: [],  // protocol compatibility, not a product capability
+});
 ```
+
+### Remove Client-Side Filesystem
+
+- Delete `src/client-handler.ts` (`SandboxedFsHandler`)
+- `AgentPool.spawn()`: remove `cwd` parameter, stop wiring `readTextFile`/`writeTextFile` handlers
+- `AgentPool.spawn()`: capability negotiation changes to `fs: {}` (not advertised)
+- Remove `cwd` parameter from `AgentPool.spawn()` signature (was only used for FS handler)
+
+### Capability Negotiation After Cleanup
+
+```typescript
+// In AgentPool.spawn() initialize call
+clientCapabilities: {
+  fs: {},          // not advertised — runtime does not proxy FS
+  terminal: false, // not advertised — no terminal in cloud
+}
+```
+
+### What This Removes
+
+| Removed | Reason |
+|---|---|
+| `src/client-handler.ts` | Runtime is not a filesystem proxy |
+| `SandboxedFsHandler` usage in `AgentPool` | Not part of product boundary |
+| `cwd` param on `AgentPool.spawn()` | Only existed for FS handler wiring |
+| `fs.readTextFile` / `fs.writeTextFile` capability | Not advertised |
+| `mcpServers` on `CreateSessionOptions` | Agent's responsibility |
 
 ## 8. Public API Changes
 
@@ -257,7 +313,8 @@ interface CreateSessionOptions {
 | `src/session-controller.ts` | Permission delegation flow with pending map; `cancel()` public method; pending permission lifecycle on complete/close/crash |
 | `src/runtime.ts` | Add `cancelRun()`, `respondToPermission()`; remove mcpServers from create flow |
 | `src/stores/file.ts` | NEW — FileSessionStore implementation |
-| `src/agent-pool.ts` | Clean up any mcpServers references in spawn path |
+| `src/agent-pool.ts` | Remove `cwd` param from `spawn()`; remove FS handler wiring; set `fs: {}` in capabilities |
+| `src/client-handler.ts` | DELETE — SandboxedFsHandler no longer needed |
 | `src/index.ts` | Export FileSessionStore; new event types already covered by SessionEvent |
 
 ## 10. Testing Strategy
@@ -265,4 +322,4 @@ interface CreateSessionOptions {
 - **FileSessionStore:** CRUD operations, atomic write (verify no partial files), Date serialization round-trip, filter behavior, missing file handling
 - **Permission delegation:** Full delegate flow (request → event → respond → ACP response), timeout auto-deny, approve-reads routing (read auto-approve vs write delegate), cleanup on cancel/close/crash (verify `cancelled` outcome)
 - **cancelRun:** Graceful cancel (ACP `session/cancel` called, prompt resolves with `cancelled`), cancel when idle (no-op), cancel during permission wait, stale runId rejection
-- **mcpServers removal:** Verify newSession called without mcpServers
+- **Boundary cleanup:** Verify newSession passes `mcpServers: []`; verify FS capabilities not advertised; verify `SandboxedFsHandler` removed; verify `AgentPool.spawn()` no longer accepts `cwd`
