@@ -21,16 +21,16 @@ const rejectAlways: PermissionOption = { optionId: 'reject-a', name: 'Reject Alw
 
 describe('PermissionController', () => {
   describe('approve-all', () => {
-    it('selects allow_always when available', () => {
+    it('prefers allow_once to avoid escalation', () => {
       const ctrl = new PermissionController('approve-all');
       const result = ctrl.resolve(makeRequest('edit', [rejectOnce, allowAlways, allowOnce]));
-      expect(result.outcome).toEqual({ outcome: 'selected', optionId: 'allow-a' });
+      expect(result.outcome).toEqual({ outcome: 'selected', optionId: 'allow-1' });
     });
 
-    it('falls back to allow_once', () => {
+    it('falls back to allow_always when allow_once unavailable', () => {
       const ctrl = new PermissionController('approve-all');
-      const result = ctrl.resolve(makeRequest('read', [rejectOnce, allowOnce]));
-      expect(result.outcome).toEqual({ outcome: 'selected', optionId: 'allow-1' });
+      const result = ctrl.resolve(makeRequest('read', [rejectOnce, allowAlways]));
+      expect(result.outcome).toEqual({ outcome: 'selected', optionId: 'allow-a' });
     });
 
     it('shouldDelegate returns false', () => {

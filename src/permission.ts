@@ -45,7 +45,7 @@ export class PermissionController {
     switch (this.mode) {
       case 'approve-all':
       case 'approve-reads': {
-        const option = this.findOption(options, 'allow_always', 'allow_once');
+        const option = this.findOption(options, 'allow_once', 'allow_always');
         if (option) return { outcome: { outcome: 'selected', optionId: option.optionId } };
         return { outcome: { outcome: 'selected', optionId: options[0].optionId } };
       }

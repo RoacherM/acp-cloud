@@ -42,6 +42,7 @@ export interface SessionRecord {
 
 export interface PendingPermission {
   runId: string;
+  validOptionIds: Set<string>;
   resolve: (resp: RequestPermissionResponse) => void;
   timer: ReturnType<typeof setTimeout>;
 }

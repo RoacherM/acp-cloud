@@ -48,12 +48,16 @@ export class CloudRuntime {
   // ── Lifecycle ───────────────────────────────────────────────────────
 
   async createSession(opts: CreateSessionOptions): Promise<SessionInfo> {
-    // Admission control: synchronous check + reservation
-    const currentActive = this.controllers.size + this.pendingCreations;
-    if (currentActive >= this.config.maxActiveSessions) {
+    // Admission control: synchronous check + reservation.
+    // Use controllers.size + pendingCreations for both checks.
+    // pool.stats().active can't be used because after spawn but before
+    // finally{pendingCreations--}, the same creation appears in both
+    // pool.stats().active AND pendingCreations, causing double-counting.
+    const totalReserved = this.controllers.size + this.pendingCreations;
+    if (totalReserved >= this.config.maxActiveSessions) {
       throw new Error('Max active sessions reached');
     }
-    if (this.pool.stats().active + this.pendingCreations >= this.config.maxAgentProcesses) {
+    if (totalReserved >= this.config.maxAgentProcesses) {
       throw new Error('Max agent processes reached');
     }
     this.pendingCreations++;

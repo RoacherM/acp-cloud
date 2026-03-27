@@ -146,10 +146,11 @@ export class SessionController {
     this.eventHub.push({ type: 'run_started', sessionId: this.sessionId, runId });
 
     this.executePrompt(content, runId).catch(() => {
-      // Error handling: complete the run with cancelled if not already done
-      if (this.execution?.activeRunId === runId) {
-        this.completeRun(runId, 'cancelled');
-      }
+      // If the run is still active, the agent process likely died.
+      // Don't complete the run here — let handleCrash() drive the
+      // transition via the AgentPool exit callback. Completing here
+      // would return the session to ready, then the crash callback
+      // would see busy→terminated out of order.
     });
 
     return {
@@ -199,7 +200,8 @@ export class SessionController {
         resolve({ outcome: { outcome: 'selected', optionId: rejectOption.optionId } });
       }, this.permissionTimeoutMs);
 
-      const pending: PendingPermission = { runId, resolve, timer };
+      const validOptionIds = new Set(request.options.map(o => o.optionId));
+      const pending: PendingPermission = { runId, validOptionIds, resolve, timer };
       this.execution!.pendingPermissions.set(requestId, pending);
     });
 
@@ -247,6 +249,9 @@ export class SessionController {
     const pending = this.execution?.pendingPermissions.get(requestId);
     if (!pending) {
       throw new Error(`No pending permission request: ${requestId}`);
+    }
+    if (!pending.validOptionIds.has(optionId)) {
+      throw new Error(`Invalid optionId '${optionId}' for permission request ${requestId}`);
     }
     clearTimeout(pending.timer);
     this.execution!.pendingPermissions.delete(requestId);
