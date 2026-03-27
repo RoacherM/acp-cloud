@@ -285,42 +285,24 @@ export class SessionController {
   }
 
   private completeRun(runId: string, stopReason: StopReason): void {
-    if (this.execution?.activeRunId !== runId) return; // Already completed
-
-    this.execution.activeRunId = null;
-    this.eventHub.push({ type: 'run_completed', sessionId: this.sessionId, runId, stopReason });
-    this.eventHub.clearRunBuffer();
-    this.emitStatusChanged('busy', 'ready', 'run_completed');
-
-    this.record.lastActivity = new Date();
-    this.store.update(this.record).catch((err) => {
-      this.eventHub.push({
-        type: 'store_error',
-        sessionId: this.sessionId,
-        operation: 'update',
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
+    this.finishRun(runId, { type: 'run_completed', sessionId: this.sessionId, runId, stopReason }, 'run_completed');
   }
 
-  /** End a run due to a transport or agent error (not a normal ACP completion). */
   private failRun(runId: string, error: string): void {
+    this.finishRun(runId, { type: 'run_error', sessionId: this.sessionId, runId, error }, 'run_error');
+  }
+
+  private finishRun(runId: string, event: SessionEvent, reason: StatusChangeReason): void {
     if (this.execution?.activeRunId !== runId) return;
 
     this.execution.activeRunId = null;
-    this.eventHub.push({ type: 'run_error', sessionId: this.sessionId, runId, error });
+    this.cancelPendingPermissions();
+    this.eventHub.push(event);
     this.eventHub.clearRunBuffer();
-    this.emitStatusChanged('busy', 'ready', 'run_error');
+    this.emitStatusChanged('busy', 'ready', reason);
 
     this.record.lastActivity = new Date();
-    this.store.update(this.record).catch((err) => {
-      this.eventHub.push({
-        type: 'store_error',
-        sessionId: this.sessionId,
-        operation: 'update',
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
+    this.persistRecord();
   }
 
   /**
@@ -344,18 +326,9 @@ export class SessionController {
     this.record.status = 'terminated';
     this.record.pid = null;
     this.record.lastActivity = new Date();
-    this.store.update(this.record)
-      .catch((err) => {
-        this.eventHub.push({
-          type: 'store_error',
-          sessionId: this.sessionId,
-          operation: 'update',
-          error: err instanceof Error ? err.message : String(err),
-        });
-      })
-      .finally(() => {
-        this.eventHub.close();
-      });
+    this.persistRecord().finally(() => {
+      this.eventHub.close();
+    });
   }
 
   /**
@@ -374,16 +347,7 @@ export class SessionController {
     this.record.status = 'terminated';
     this.record.pid = null;
     this.record.lastActivity = new Date();
-    try {
-      await this.store.update(this.record);
-    } catch (err) {
-      this.eventHub.push({
-        type: 'store_error',
-        sessionId: this.sessionId,
-        operation: 'update',
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    await this.persistRecord();
 
     this.emitStatusChanged(prevStatus, 'terminated', 'user_closed');
     this.eventHub.close();
@@ -392,6 +356,17 @@ export class SessionController {
   /** Get the AgentHandle (used by CloudRuntime for crash matching). */
   getHandle(): AgentHandle | null {
     return this.execution?.handle ?? null;
+  }
+
+  /** Fire-and-forget store update; emits store_error on failure. */
+  private persistRecord(): Promise<void> {
+    return this.store.update(this.record).catch((err) => {
+      this.eventHub.push({
+        type: 'store_error',
+        sessionId: this.sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   }
 
   private emitStatusChanged(from: SessionStatus, to: SessionStatus, reason: StatusChangeReason): void {

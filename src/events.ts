@@ -173,7 +173,6 @@ export interface PermissionTimeoutEvent {
 export interface StoreErrorEvent {
   type: 'store_error';
   sessionId: string;
-  operation: string;
   error: string;
 }
 
