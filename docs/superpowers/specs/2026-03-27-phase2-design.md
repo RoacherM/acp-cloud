@@ -4,14 +4,41 @@
 
 Make the ACP Cloud Runtime production-ready for Phase 3 (HTTP/SSE server) by adding durable session persistence, interactive permission delegation, graceful run cancellation, and tightening the product boundary to match the refined MVP scope.
 
-## 2. Scope
+## 2. Current State (Phase 1 + 1.5)
 
-Three features plus one cleanup:
+Phase 1 and 1.5 delivered the core runtime. Some features now conflict with the refined MVP boundary and must be cleaned up.
+
+### Features Retained
+
+| Component | What It Does |
+|---|---|
+| `CloudRuntime` | Id-centric public API, admission control, crash supervision |
+| `SessionController` | Per-session actor: lifecycle, state transitions, event emission |
+| `EventHub` | Async iterable event stream, run buffering for late subscribers |
+| `AgentPool` | Spawn/kill agent processes, exit callback for crash detection |
+| `PermissionController` | `approve-all` and `deny-all` auto-resolution |
+| `MemorySessionStore` | In-memory session persistence with defensive copying |
+| Event converter | All 11 ACP `session/update` types + 3 lifecycle events |
+| Durable/ephemeral split | `RecordStatus` (persisted) vs `SessionStatus` (derived) |
+
+### Features To Remove (conflict with refined boundary)
+
+| Feature | Current Location | Why Remove |
+|---|---|---|
+| `SandboxedFsHandler` | `src/client-handler.ts` | Runtime is not a filesystem proxy |
+| FS capability negotiation | `src/agent-pool.ts` | `fs.readTextFile` / `fs.writeTextFile` not advertised |
+| `cwd` param on `AgentPool.spawn()` | `src/agent-pool.ts` | Only existed for FS handler wiring |
+| `mcpServers` on `CreateSessionOptions` | `src/types.ts` | Agent's responsibility, not runtime's |
+| `mcpServers` passed to `newSession()` | `src/session-controller.ts` | Pass `[]` for protocol compat only |
+
+## 3. Scope
+
+Three features plus boundary cleanup:
 
 1. **FileSessionStore** — JSON-per-session durable persistence
 2. **Permission delegation** — interactive `delegate` mode via EventHub; fix `approve-reads` to actually work
 3. **cancelRun** — graceful ACP `session/cancel`, session stays alive
-4. **Boundary cleanup** — remove `mcpServers` from session path; remove FS capability and `SandboxedFsHandler`; ensure capability negotiation reflects the narrowed product boundary
+4. **Boundary cleanup** — remove features from Section 2 above; ensure capability negotiation reflects the narrowed product boundary
 
 ### Out of Scope (deferred)
 
