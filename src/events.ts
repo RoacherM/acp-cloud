@@ -1,31 +1,26 @@
+// src/events.ts
 import type {
   SessionNotification,
   SessionUpdate,
   ContentBlock,
   ContentChunk,
-  ToolCall,
-  ToolCallUpdate,
   ToolCallContent,
   ToolCallLocation,
   ToolCallStatus,
   ToolKind,
-  Plan,
   PlanEntry,
-  AvailableCommandsUpdate,
   AvailableCommand,
-  CurrentModeUpdate,
-  ConfigOptionUpdate,
   SessionConfigOption,
-  SessionInfoUpdate,
-  UsageUpdate,
   Cost,
   StopReason,
   PermissionOption,
 } from '@agentclientprotocol/sdk';
 
-// ── RunEvent: flattened union mirroring SessionUpdate variants ──────────
+import type { SessionStatus, StatusChangeReason } from './types.js';
 
-export type RunEvent =
+// ── SessionEvent: flattened union covering ACP + lifecycle events ────────
+
+export type SessionEvent =
   | UserMessageChunkEvent
   | AgentMessageChunkEvent
   | AgentThoughtChunkEvent
@@ -36,13 +31,17 @@ export type RunEvent =
   | CurrentModeUpdateEvent
   | ConfigOptionUpdateEvent
   | SessionInfoUpdateEvent
-  | UsageUpdateEvent;
+  | UsageUpdateEvent
+  | RunStartedEvent
+  | RunCompletedEvent
+  | SessionStatusChangedEvent;
 
-// ── Individual event types ─────────────────────────────────────────────
+// ── ACP session/update events (with optional runId) ─────────────────────
 
 export interface UserMessageChunkEvent {
   type: 'user_message_chunk';
   sessionId: string;
+  runId?: string;
   content: ContentBlock;
   messageId?: string | null;
 }
@@ -50,6 +49,7 @@ export interface UserMessageChunkEvent {
 export interface AgentMessageChunkEvent {
   type: 'agent_message_chunk';
   sessionId: string;
+  runId?: string;
   content: ContentBlock;
   messageId?: string | null;
 }
@@ -57,6 +57,7 @@ export interface AgentMessageChunkEvent {
 export interface AgentThoughtChunkEvent {
   type: 'agent_thought_chunk';
   sessionId: string;
+  runId?: string;
   content: ContentBlock;
   messageId?: string | null;
 }
@@ -64,6 +65,7 @@ export interface AgentThoughtChunkEvent {
 export interface ToolCallEvent {
   type: 'tool_call';
   sessionId: string;
+  runId?: string;
   toolCallId: string;
   title: string;
   kind?: ToolKind;
@@ -77,6 +79,7 @@ export interface ToolCallEvent {
 export interface ToolCallUpdateEvent {
   type: 'tool_call_update';
   sessionId: string;
+  runId?: string;
   toolCallId: string;
   title?: string | null;
   kind?: ToolKind | null;
@@ -90,30 +93,35 @@ export interface ToolCallUpdateEvent {
 export interface PlanEvent {
   type: 'plan';
   sessionId: string;
+  runId?: string;
   entries: PlanEntry[];
 }
 
 export interface AvailableCommandsUpdateEvent {
   type: 'available_commands_update';
   sessionId: string;
+  runId?: string;
   availableCommands: AvailableCommand[];
 }
 
 export interface CurrentModeUpdateEvent {
   type: 'current_mode_update';
   sessionId: string;
+  runId?: string;
   currentModeId: string;
 }
 
 export interface ConfigOptionUpdateEvent {
   type: 'config_option_update';
   sessionId: string;
+  runId?: string;
   configOptions: SessionConfigOption[];
 }
 
 export interface SessionInfoUpdateEvent {
   type: 'session_info_update';
   sessionId: string;
+  runId?: string;
   title?: string | null;
   updatedAt?: string | null;
 }
@@ -121,152 +129,87 @@ export interface SessionInfoUpdateEvent {
 export interface UsageUpdateEvent {
   type: 'usage_update';
   sessionId: string;
+  runId?: string;
   size: number;
   used: number;
   cost?: Cost | null;
 }
 
-// ── Converter ──────────────────────────────────────────────────────────
+// ── Lifecycle events (emitted by SessionController) ─────────────────────
+
+export interface RunStartedEvent {
+  type: 'run_started';
+  sessionId: string;
+  runId: string;
+}
+
+export interface RunCompletedEvent {
+  type: 'run_completed';
+  sessionId: string;
+  runId: string;
+  stopReason: StopReason;
+}
+
+export interface SessionStatusChangedEvent {
+  type: 'session_status_changed';
+  sessionId: string;
+  from: SessionStatus;
+  to: SessionStatus;
+  reason: StatusChangeReason;
+}
+
+// ── Converter: ACP SessionNotification → SessionEvent ───────────────────
 
 /**
- * Converts a raw ACP SessionNotification into a flattened RunEvent.
- *
- * Maps 1:1 from the discriminated `sessionUpdate` field on SessionUpdate
- * to the `type` field on RunEvent, pulling relevant fields up to top level.
+ * Converts a raw ACP SessionNotification into a flattened SessionEvent.
+ * The caller is responsible for injecting `runId` after conversion.
  */
-export function sessionUpdateToRunEvent(notification: SessionNotification): RunEvent {
+export function sessionUpdateToSessionEvent(notification: SessionNotification): SessionEvent {
   const { sessionId, update } = notification;
 
   switch (update.sessionUpdate) {
     case 'user_message_chunk':
-      return {
-        type: 'user_message_chunk',
-        sessionId,
-        content: update.content,
-        messageId: update.messageId,
-      };
-
+      return { type: 'user_message_chunk', sessionId, content: update.content, messageId: update.messageId };
     case 'agent_message_chunk':
-      return {
-        type: 'agent_message_chunk',
-        sessionId,
-        content: update.content,
-        messageId: update.messageId,
-      };
-
+      return { type: 'agent_message_chunk', sessionId, content: update.content, messageId: update.messageId };
     case 'agent_thought_chunk':
-      return {
-        type: 'agent_thought_chunk',
-        sessionId,
-        content: update.content,
-        messageId: update.messageId,
-      };
-
+      return { type: 'agent_thought_chunk', sessionId, content: update.content, messageId: update.messageId };
     case 'tool_call':
       return {
-        type: 'tool_call',
-        sessionId,
-        toolCallId: update.toolCallId,
-        title: update.title,
-        kind: update.kind,
-        status: update.status,
-        content: update.content,
-        locations: update.locations,
-        rawInput: update.rawInput,
-        rawOutput: update.rawOutput,
+        type: 'tool_call', sessionId, toolCallId: update.toolCallId, title: update.title,
+        kind: update.kind, status: update.status, content: update.content,
+        locations: update.locations, rawInput: update.rawInput, rawOutput: update.rawOutput,
       };
-
     case 'tool_call_update':
       return {
-        type: 'tool_call_update',
-        sessionId,
-        toolCallId: update.toolCallId,
-        title: update.title,
-        kind: update.kind,
-        status: update.status,
-        content: update.content,
-        locations: update.locations,
-        rawInput: update.rawInput,
-        rawOutput: update.rawOutput,
+        type: 'tool_call_update', sessionId, toolCallId: update.toolCallId,
+        title: update.title, kind: update.kind, status: update.status, content: update.content,
+        locations: update.locations, rawInput: update.rawInput, rawOutput: update.rawOutput,
       };
-
     case 'plan':
-      return {
-        type: 'plan',
-        sessionId,
-        entries: update.entries,
-      };
-
+      return { type: 'plan', sessionId, entries: update.entries };
     case 'available_commands_update':
-      return {
-        type: 'available_commands_update',
-        sessionId,
-        availableCommands: update.availableCommands,
-      };
-
+      return { type: 'available_commands_update', sessionId, availableCommands: update.availableCommands };
     case 'current_mode_update':
-      return {
-        type: 'current_mode_update',
-        sessionId,
-        currentModeId: update.currentModeId,
-      };
-
+      return { type: 'current_mode_update', sessionId, currentModeId: update.currentModeId };
     case 'config_option_update':
-      return {
-        type: 'config_option_update',
-        sessionId,
-        configOptions: update.configOptions,
-      };
-
+      return { type: 'config_option_update', sessionId, configOptions: update.configOptions };
     case 'session_info_update':
-      return {
-        type: 'session_info_update',
-        sessionId,
-        title: update.title,
-        updatedAt: update.updatedAt,
-      };
-
+      return { type: 'session_info_update', sessionId, title: update.title, updatedAt: update.updatedAt };
     case 'usage_update':
-      return {
-        type: 'usage_update',
-        sessionId,
-        size: update.size,
-        used: update.used,
-        cost: update.cost,
-      };
-
+      return { type: 'usage_update', sessionId, size: update.size, used: update.used, cost: update.cost };
     default: {
-      // Exhaustiveness check: if a new variant is added to the SDK,
-      // TypeScript will error here at compile time.
       const _exhaustive: never = update;
       throw new Error(`Unknown session update type: ${(update as SessionUpdate).sessionUpdate}`);
     }
   }
 }
 
-// ── Re-exports for downstream convenience ──────────────────────────────
+// ── Re-exports ──────────────────────────────────────────────────────────
 
 export type {
-  SessionNotification,
-  SessionUpdate,
-  ContentBlock,
-  ContentChunk,
-  ToolCall,
-  ToolCallUpdate,
-  ToolCallContent,
-  ToolCallLocation,
-  ToolCallStatus,
-  ToolKind,
-  Plan,
-  PlanEntry,
-  AvailableCommandsUpdate,
-  AvailableCommand,
-  CurrentModeUpdate,
-  ConfigOptionUpdate,
-  SessionConfigOption,
-  SessionInfoUpdate,
-  UsageUpdate,
-  Cost,
-  StopReason,
-  PermissionOption,
+  SessionNotification, SessionUpdate, ContentBlock, ContentChunk,
+  ToolCallContent, ToolCallLocation, ToolCallStatus, ToolKind,
+  PlanEntry, AvailableCommand, SessionConfigOption,
+  Cost, StopReason, PermissionOption,
 };
