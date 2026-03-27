@@ -18,9 +18,9 @@ import type {
 
 import type { SessionStatus, StatusChangeReason } from './types.js';
 
-// ── SessionEvent: flattened union covering ACP + lifecycle events ────────
+// ── ACP event subset (returned by converter, supports runId injection) ───
 
-export type SessionEvent =
+export type AcpSessionEvent =
   | UserMessageChunkEvent
   | AgentMessageChunkEvent
   | AgentThoughtChunkEvent
@@ -31,7 +31,12 @@ export type SessionEvent =
   | CurrentModeUpdateEvent
   | ConfigOptionUpdateEvent
   | SessionInfoUpdateEvent
-  | UsageUpdateEvent
+  | UsageUpdateEvent;
+
+// ── SessionEvent: full union covering ACP + lifecycle events ────────────
+
+export type SessionEvent =
+  | AcpSessionEvent
   | RunStartedEvent
   | RunCompletedEvent
   | SessionStatusChangedEvent;
@@ -161,11 +166,16 @@ export interface SessionStatusChangedEvent {
 // ── Converter: ACP SessionNotification → SessionEvent ───────────────────
 
 /**
- * Converts a raw ACP SessionNotification into a flattened SessionEvent.
- * The caller is responsible for injecting `runId` after conversion.
+ * Converts a raw ACP SessionNotification into a typed AcpSessionEvent.
+ * Accepts an optional `overrideSessionId` to replace the ACP-internal session ID
+ * with the cloud runtime's public session ID.
  */
-export function sessionUpdateToSessionEvent(notification: SessionNotification): SessionEvent {
-  const { sessionId, update } = notification;
+export function sessionUpdateToSessionEvent(
+  notification: SessionNotification,
+  overrideSessionId?: string,
+): AcpSessionEvent {
+  const sessionId = overrideSessionId ?? notification.sessionId;
+  const { update } = notification;
 
   switch (update.sessionUpdate) {
     case 'user_message_chunk':

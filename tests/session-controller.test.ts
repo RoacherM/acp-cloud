@@ -77,10 +77,11 @@ describe('SessionController', () => {
     expect(types).toContain('agent_message_chunk');
     expect(types).toContain('run_completed');
 
-    // All ACP events during run should have runId
+    // All ACP events during run should have runId and cloud sessionId (not ACP sessionId)
     const acpEvents = events.filter(e => e.type === 'agent_message_chunk');
     for (const e of acpEvents) {
       expect((e as any).runId).toBe(runInfo.id);
+      expect(e.sessionId).toBe(ctrl.sessionId);
     }
 
     await ctrl.close();

@@ -97,7 +97,13 @@ export class SessionController {
       lastActivity: now,
       metadata: {},
     };
-    await opts.store.create(record);
+
+    try {
+      await opts.store.create(record);
+    } catch (err) {
+      opts.pool.kill(handle);
+      throw err;
+    }
 
     const execution: SessionExecution = {
       handle,
@@ -123,8 +129,10 @@ export class SessionController {
     this.record.lastActivity = new Date();
     await this.store.update(this.record);
 
-    this.eventHub.startRunBuffer(runId);
+    // Emit status change BEFORE buffer starts — late subscribers should NOT replay the status change
     this.emitStatusChanged('ready', 'busy', 'prompt_started');
+    // Buffer starts at run_started — spec: "replay from run_started onward"
+    this.eventHub.startRunBuffer(runId);
     this.eventHub.push({ type: 'run_started', sessionId: this.sessionId, runId });
 
     this.executePrompt(content, runId).catch(() => {
@@ -146,7 +154,8 @@ export class SessionController {
     const handle = this.execution!.handle;
 
     handle.handlers.onSessionUpdate = (notification) => {
-      const event = sessionUpdateToSessionEvent(notification);
+      // Override ACP sessionId with our cloud session ID, inject runId
+      const event = sessionUpdateToSessionEvent(notification, this.sessionId);
       this.eventHub.push({ ...event, runId });
     };
 
