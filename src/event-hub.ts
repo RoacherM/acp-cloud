@@ -31,12 +31,10 @@ export class EventHub {
   push(event: SessionEvent): void {
     if (this.closed) return;
 
-    // Append to run buffer if active
     if (this.runBuffer) {
       this.runBuffer.push(event);
     }
 
-    // Deliver to all live subscribers
     for (const sub of this.subscribers) {
       sub.queue.push(event);
       if (sub.resolve) {
@@ -51,7 +49,6 @@ export class EventHub {
     const hub = this;
     const sub: Subscriber = { queue: [], resolve: null };
 
-    // Replay buffered events if there's an active run
     if (this.runBuffer) {
       sub.queue.push(...this.runBuffer);
     }

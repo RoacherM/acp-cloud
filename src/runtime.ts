@@ -12,7 +12,7 @@ import type {
   PermissionMode,
   SessionFilter,
 } from './types.js';
-import { toSessionInfo } from './types.js';
+import { toSessionInfo, derivePublicStatus } from './types.js';
 import type { SessionEvent } from './events.js';
 
 export class CloudRuntime {
@@ -74,8 +74,7 @@ export class CloudRuntime {
         this.handleToSession.set(handle, ctrl.sessionId);
       }
 
-      const record = await this.store.get(ctrl.sessionId);
-      return toSessionInfo(record!, null);
+      return toSessionInfo(ctrl.getRecord(), 'ready');
     } finally {
       this.pendingCreations--;
     }
@@ -86,15 +85,9 @@ export class CloudRuntime {
     if (!record) return null;
     const ctrl = this.controllers.get(id);
     if (ctrl) {
-      return {
-        id: record.id,
-        agentId: record.agentId,
-        status: ctrl.publicStatus,
-        createdAt: record.createdAt,
-        lastActivity: record.lastActivity,
-      };
+      return toSessionInfo(record, ctrl.publicStatus);
     }
-    return toSessionInfo(record, null);
+    return toSessionInfo(record, derivePublicStatus(record, null));
   }
 
   async listSessions(filter?: SessionFilter): Promise<SessionInfo[]> {
@@ -102,15 +95,9 @@ export class CloudRuntime {
     return records.map(record => {
       const ctrl = this.controllers.get(record.id);
       if (ctrl) {
-        return {
-          id: record.id,
-          agentId: record.agentId,
-          status: ctrl.publicStatus,
-          createdAt: record.createdAt,
-          lastActivity: record.lastActivity,
-        };
+        return toSessionInfo(record, ctrl.publicStatus);
       }
-      return toSessionInfo(record, null);
+      return toSessionInfo(record, derivePublicStatus(record, null));
     });
   }
 

@@ -75,12 +75,12 @@ export function derivePublicStatus(
 
 export function toSessionInfo(
   record: SessionRecord,
-  execution: SessionExecution | null,
+  status: SessionStatus,
 ): SessionInfo {
   return {
     id: record.id,
     agentId: record.agentId,
-    status: derivePublicStatus(record, execution),
+    status,
     createdAt: record.createdAt,
     lastActivity: record.lastActivity,
   };

@@ -55,20 +55,16 @@ export class AgentPool {
       throw new Error(`Unknown agent: ${agentId}`);
     }
 
-    // 1. Spawn the child process
     const child = cpSpawn(def.command, def.args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, ...def.env },
     });
 
-    // 2. Convert Node streams to Web streams
     const input = Readable.toWeb(child.stdout!) as ReadableStream<Uint8Array>;
     const output = Writable.toWeb(child.stdin!) as WritableStream<Uint8Array>;
 
-    // 3. Build the NDJSON stream (writable first, readable second)
     const stream = ndJsonStream(output, input);
 
-    // 4. Create mutable handlers reference with defaults
     const handlersRef: ClientHandlers = {
       onSessionUpdate: () => {},
       onPermissionRequest: async (params) => ({
@@ -79,7 +75,6 @@ export class AgentPool {
       }),
     };
 
-    // 5. Create Client that delegates to handlersRef
     const fsHandler = cwd ? new SandboxedFsHandler(cwd) : null;
 
     const client: Client = {
@@ -100,10 +95,8 @@ export class AgentPool {
       } : {}),
     } as any;
 
-    // 6. Create the client-side ACP connection
     const connection = new ClientSideConnection((_agent: Agent) => client, stream);
 
-    // 7. Initialize the ACP protocol
     const initResponse = await connection.initialize({
       protocolVersion: PROTOCOL_VERSION,
       clientCapabilities: {
@@ -113,7 +106,6 @@ export class AgentPool {
       clientInfo: { name: 'acp-cloud-runtime', version: '0.1.0' },
     });
 
-    // 8. Build the handle
     const handle: AgentHandle = {
       pid: child.pid!,
       connection,
@@ -125,7 +117,6 @@ export class AgentPool {
       handlers: handlersRef,
     };
 
-    // 9. Track and listen for exit
     this.handles.add(handle);
     this.totalSpawned++;
 

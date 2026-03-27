@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { derivePublicStatus, toSessionInfo } from '../src/types.js';
-import type { SessionRecord, SessionExecution } from '../src/types.js';
+import type { SessionRecord } from '../src/types.js';
 
 function makeRecord(overrides: Partial<SessionRecord> = {}): SessionRecord {
   return {
@@ -49,9 +49,9 @@ describe('derivePublicStatus', () => {
 });
 
 describe('toSessionInfo', () => {
-  it('builds SessionInfo DTO from record and execution', () => {
+  it('builds SessionInfo DTO from record and status', () => {
     const record = makeRecord({ status: 'ready' });
-    const info = toSessionInfo(record, null);
+    const info = toSessionInfo(record, 'ready');
     expect(info).toEqual({
       id: 'sess-1',
       agentId: 'mock',
@@ -61,10 +61,15 @@ describe('toSessionInfo', () => {
     });
   });
 
-  it('reflects busy status from active run', () => {
+  it('reflects busy status', () => {
     const record = makeRecord({ status: 'ready' });
-    const execution = { handle: {} as any, activeRunId: 'run-1' };
-    const info = toSessionInfo(record, execution);
+    const info = toSessionInfo(record, 'busy');
     expect(info.status).toBe('busy');
+  });
+
+  it('reflects terminated status', () => {
+    const record = makeRecord({ status: 'terminated' });
+    const info = toSessionInfo(record, 'terminated');
+    expect(info.status).toBe('terminated');
   });
 });
