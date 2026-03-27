@@ -1,79 +1,182 @@
-import { AgentPool } from './agent-pool.js';
-import { Session } from './session.js';
+// src/runtime.ts
+import type { ContentBlock } from '@agentclientprotocol/sdk';
+import { AgentPool, type AgentHandle } from './agent-pool.js';
+import { SessionController } from './session-controller.js';
 import { MemorySessionStore } from './stores/memory.js';
 import type {
   RuntimeConfig,
   SessionStore,
-  SessionRecord,
+  SessionInfo,
+  RunInfo,
   CreateSessionOptions,
   PermissionMode,
-  NonInteractivePolicy,
-  RecoveryPolicy,
+  SessionFilter,
 } from './types.js';
+import { toSessionInfo } from './types.js';
+import type { SessionEvent } from './events.js';
 
 export class CloudRuntime {
   private pool: AgentPool;
   private store: SessionStore;
-  private sessions = new Map<string, Session>();
+  private controllers = new Map<string, SessionController>();
+  private handleToSession = new Map<AgentHandle, string>();
+  private pendingCreations = 0;
   private config: {
     defaultPermissionMode: PermissionMode;
-    defaultNonInteractivePolicy: NonInteractivePolicy;
-    defaultRecoveryPolicy: RecoveryPolicy;
     maxAgentProcesses: number;
     maxActiveSessions: number;
-    sessionTTL: number;
-    sleepTTL: number;
-    maxQueueDepth: number;
   };
 
   constructor(config: RuntimeConfig) {
-    this.pool = new AgentPool({ agents: config.agents });
     this.store = config.sessionStore ?? new MemorySessionStore();
     this.config = {
       defaultPermissionMode: config.defaultPermissionMode ?? 'approve-all',
-      defaultNonInteractivePolicy: config.defaultNonInteractivePolicy ?? 'deny',
-      defaultRecoveryPolicy: config.defaultRecoveryPolicy ?? 'fallback-new',
       maxAgentProcesses: config.maxAgentProcesses ?? 20,
       maxActiveSessions: config.maxActiveSessions ?? 50,
-      sessionTTL: config.sessionTTL ?? 300_000,
-      sleepTTL: config.sleepTTL ?? 86_400_000,
-      maxQueueDepth: config.maxQueueDepth ?? 8,
     };
+
+    this.pool = new AgentPool({
+      agents: config.agents,
+      onProcessExit: (handle, code, signal) => {
+        this.handleProcessExit(handle, code, signal);
+      },
+    });
   }
 
-  async createSession(opts: CreateSessionOptions): Promise<Session> {
-    const session = await Session.create({
-      agentId: opts.agent,
-      cwd: opts.cwd,
-      permissionMode: opts.permissionMode ?? this.config.defaultPermissionMode,
-      nonInteractivePolicy: opts.nonInteractivePolicy ?? this.config.defaultNonInteractivePolicy,
-      recoveryPolicy: opts.recoveryPolicy ?? this.config.defaultRecoveryPolicy,
-      agentModeId: opts.agentModeId,
-      mcpServers: opts.mcpServers,
-      pool: this.pool,
-      store: this.store,
-    });
-    this.sessions.set(session.id, session);
-    return session;
+  // ── Lifecycle ───────────────────────────────────────────────────────
+
+  async createSession(opts: CreateSessionOptions): Promise<SessionInfo> {
+    // Admission control: synchronous check + reservation
+    const currentActive = this.controllers.size + this.pendingCreations;
+    if (currentActive >= this.config.maxActiveSessions) {
+      throw new Error('Max active sessions reached');
+    }
+    if (this.pool.stats().active + this.pendingCreations >= this.config.maxAgentProcesses) {
+      throw new Error('Max agent processes reached');
+    }
+    this.pendingCreations++;
+
+    try {
+      const ctrl = await SessionController.create({
+        agentId: opts.agent,
+        cwd: opts.cwd,
+        permissionMode: opts.permissionMode ?? this.config.defaultPermissionMode,
+        mcpServers: opts.mcpServers,
+        pool: this.pool,
+        store: this.store,
+      });
+
+      this.controllers.set(ctrl.sessionId, ctrl);
+
+      // Map handle → sessionId for crash lookup
+      const handle = ctrl.getHandle();
+      if (handle) {
+        this.handleToSession.set(handle, ctrl.sessionId);
+      }
+
+      const record = await this.store.get(ctrl.sessionId);
+      return toSessionInfo(record!, null);
+    } finally {
+      this.pendingCreations--;
+    }
   }
+
+  async getSession(id: string): Promise<SessionInfo | null> {
+    const record = await this.store.get(id);
+    if (!record) return null;
+    const ctrl = this.controllers.get(id);
+    if (ctrl) {
+      return {
+        id: record.id,
+        agentId: record.agentId,
+        status: ctrl.publicStatus,
+        createdAt: record.createdAt,
+        lastActivity: record.lastActivity,
+      };
+    }
+    return toSessionInfo(record, null);
+  }
+
+  async listSessions(filter?: SessionFilter): Promise<SessionInfo[]> {
+    const records = await this.store.list(filter);
+    return records.map(record => {
+      const ctrl = this.controllers.get(record.id);
+      if (ctrl) {
+        return {
+          id: record.id,
+          agentId: record.agentId,
+          status: ctrl.publicStatus,
+          createdAt: record.createdAt,
+          lastActivity: record.lastActivity,
+        };
+      }
+      return toSessionInfo(record, null);
+    });
+  }
+
+  async closeSession(id: string): Promise<void> {
+    const ctrl = this.controllers.get(id);
+    if (!ctrl) return;
+
+    const handle = ctrl.getHandle();
+    if (handle) {
+      this.handleToSession.delete(handle);
+    }
+
+    await ctrl.close();
+    this.controllers.delete(id);
+  }
+
+  // ── Prompting ───────────────────────────────────────────────────────
+
+  async promptSession(id: string, content: ContentBlock[]): Promise<RunInfo> {
+    const ctrl = this.controllers.get(id);
+    if (!ctrl) throw new Error(`Session not found: ${id}`);
+    return ctrl.prompt(content);
+  }
+
+  // ── Events ──────────────────────────────────────────────────────────
+
+  subscribeSession(id: string): AsyncIterable<SessionEvent> {
+    const ctrl = this.controllers.get(id);
+    if (!ctrl) {
+      return {
+        [Symbol.asyncIterator]() {
+          return { async next() { return { done: true, value: undefined }; } };
+        },
+      };
+    }
+    return ctrl.subscribe();
+  }
+
+  // ── Discovery ─────────────────────────────────────────────────────
 
   listAgents(): string[] {
     return this.pool.getAgentIds();
   }
 
-  async listSessions(): Promise<SessionRecord[]> {
-    return this.store.list();
-  }
-
-  async getSession(id: string): Promise<Session | null> {
-    return this.sessions.get(id) ?? null;
-  }
+  // ── Shutdown ──────────────────────────────────────────────────────
 
   async shutdown(): Promise<void> {
     await Promise.all(
-      Array.from(this.sessions.values()).map(s => s.close())
+      Array.from(this.controllers.values()).map(ctrl => ctrl.close()),
     );
-    this.sessions.clear();
+    this.controllers.clear();
+    this.handleToSession.clear();
     this.pool.killAll();
+  }
+
+  // ── Private ───────────────────────────────────────────────────────
+
+  private handleProcessExit(handle: AgentHandle, _code: number | null, _signal: string | null): void {
+    const sessionId = this.handleToSession.get(handle);
+    if (!sessionId) return;
+
+    const ctrl = this.controllers.get(sessionId);
+    if (!ctrl) return;
+
+    this.handleToSession.delete(handle);
+    ctrl.handleCrash();
+    this.controllers.delete(sessionId);
   }
 }
