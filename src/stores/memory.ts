@@ -1,4 +1,5 @@
 import type { SessionStore, SessionRecord, SessionFilter } from './interface.js';
+import { applySessionFilter } from './filters.js';
 
 function copyRecord(record: SessionRecord): SessionRecord {
   return {
@@ -33,17 +34,7 @@ export class MemorySessionStore implements SessionStore {
   }
 
   async list(filter?: SessionFilter): Promise<SessionRecord[]> {
-    let records = Array.from(this.map.values());
-
-    if (filter?.agentId !== undefined) {
-      records = records.filter(r => r.agentId === filter.agentId);
-    }
-
-    if (filter?.status !== undefined) {
-      const statuses = Array.isArray(filter.status) ? filter.status : [filter.status];
-      records = records.filter(r => statuses.includes(r.status));
-    }
-
-    return records.map(copyRecord);
+    const records = Array.from(this.map.values());
+    return applySessionFilter(records, filter).map(copyRecord);
   }
 }

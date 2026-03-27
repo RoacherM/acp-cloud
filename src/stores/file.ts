@@ -1,6 +1,7 @@
-import { readFile, writeFile, rename, unlink, readdir } from 'node:fs/promises';
+import { readFile, writeFile, rename, unlink, readdir, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SessionStore, SessionRecord, SessionFilter } from './interface.js';
+import { applySessionFilter } from './filters.js';
 
 const DATE_FIELDS: (keyof SessionRecord)[] = ['createdAt', 'lastActivity'];
 
@@ -20,15 +21,14 @@ export class FileSessionStore implements SessionStore {
     return join(this.dir, `${id}.json`);
   }
 
-  private tmpPath(id: string): string {
-    return join(this.dir, `${id}.tmp`);
+  private async atomicWrite(id: string, data: string): Promise<void> {
+    const tmp = join(this.dir, `${id}.tmp`);
+    await writeFile(tmp, data, 'utf-8');
+    await rename(tmp, this.filePath(id));
   }
 
   async create(record: SessionRecord): Promise<void> {
-    const data = JSON.stringify(record);
-    const tmp = this.tmpPath(record.id);
-    await writeFile(tmp, data, 'utf-8');
-    await rename(tmp, this.filePath(record.id));
+    await this.atomicWrite(record.id, JSON.stringify(record));
   }
 
   async get(id: string): Promise<SessionRecord | null> {
@@ -42,14 +42,14 @@ export class FileSessionStore implements SessionStore {
   }
 
   async update(record: SessionRecord): Promise<void> {
-    const existing = await this.get(record.id);
-    if (!existing) {
-      throw new Error(`SessionRecord not found: ${record.id}`);
+    // Verify file exists without reading its contents
+    try {
+      await access(this.filePath(record.id));
+    } catch (err: any) {
+      if (err.code === 'ENOENT') throw new Error(`SessionRecord not found: ${record.id}`);
+      throw err;
     }
-    const data = JSON.stringify(record);
-    const tmp = this.tmpPath(record.id);
-    await writeFile(tmp, data, 'utf-8');
-    await rename(tmp, this.filePath(record.id));
+    await this.atomicWrite(record.id, JSON.stringify(record));
   }
 
   async delete(id: string): Promise<void> {
@@ -82,17 +82,6 @@ export class FileSessionStore implements SessionStore {
       }
     }
 
-    let result = records;
-
-    if (filter?.agentId !== undefined) {
-      result = result.filter(r => r.agentId === filter.agentId);
-    }
-
-    if (filter?.status !== undefined) {
-      const statuses = Array.isArray(filter.status) ? filter.status : [filter.status];
-      result = result.filter(r => statuses.includes(r.status));
-    }
-
-    return result;
+    return applySessionFilter(records, filter);
   }
 }

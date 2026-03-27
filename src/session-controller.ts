@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ContentBlock, StopReason, RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
 import { AgentPool, type AgentHandle } from './agent-pool.js';
-import { PermissionController } from './permission.js';
+import { PermissionController, findPermissionOption } from './permission.js';
 import { EventHub } from './event-hub.js';
 import { sessionUpdateToSessionEvent } from './events.js';
 import type { SessionEvent } from './events.js';
@@ -193,9 +193,8 @@ export class SessionController {
     const permissionPromise = new Promise<RequestPermissionResponse>((resolve) => {
       const timer = setTimeout(() => {
         this.execution?.pendingPermissions.delete(requestId);
-        const rejectOption = request.options.find(o => o.kind === 'reject_once')
-          ?? request.options.find(o => o.kind === 'reject_always')
-          ?? request.options[0];
+        const rejectOption = findPermissionOption(request.options, 'reject_once', 'reject_always');
+        if (!rejectOption) throw new Error('No reject option available for timeout resolution');
         this.eventHub.push({ type: 'permission_timeout', sessionId: this.sessionId, requestId });
         resolve({ outcome: { outcome: 'selected', optionId: rejectOption.optionId } });
       }, this.permissionTimeoutMs);

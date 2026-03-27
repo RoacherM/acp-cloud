@@ -4,19 +4,20 @@ import type { PermissionMode } from './types.js';
 /** ToolKind values considered read-only (auto-approved by approve-reads mode). */
 const READ_KINDS = new Set(['read', 'search', 'think', 'fetch']);
 
+/** Find the first option matching any of the given kinds. */
+export function findPermissionOption(
+  options: PermissionOption[],
+  ...kinds: PermissionOption['kind'][]
+): PermissionOption | undefined {
+  for (const kind of kinds) {
+    const found = options.find((o) => o.kind === kind);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 export class PermissionController {
   constructor(private readonly mode: PermissionMode) {}
-
-  private findOption(
-    options: PermissionOption[],
-    ...kinds: PermissionOption['kind'][]
-  ): PermissionOption | undefined {
-    for (const kind of kinds) {
-      const found = options.find((o) => o.kind === kind);
-      if (found) return found;
-    }
-    return undefined;
-  }
 
   /**
    * Should this request be delegated to the external client?
@@ -38,6 +39,7 @@ export class PermissionController {
 
   /**
    * Auto-resolve a permission request (used for non-delegated requests).
+   * Throws if no suitable option exists — never silently picks the wrong kind.
    */
   resolve(request: RequestPermissionRequest): RequestPermissionResponse {
     const { options } = request;
@@ -45,16 +47,16 @@ export class PermissionController {
     switch (this.mode) {
       case 'approve-all':
       case 'approve-reads': {
-        const option = this.findOption(options, 'allow_once', 'allow_always');
-        if (option) return { outcome: { outcome: 'selected', optionId: option.optionId } };
-        return { outcome: { outcome: 'selected', optionId: options[0].optionId } };
+        const option = findPermissionOption(options, 'allow_once', 'allow_always');
+        if (!option) throw new Error('No allow option available in permission request');
+        return { outcome: { outcome: 'selected', optionId: option.optionId } };
       }
 
       case 'deny-all':
       case 'delegate': {
-        const option = this.findOption(options, 'reject_once', 'reject_always');
-        if (option) return { outcome: { outcome: 'selected', optionId: option.optionId } };
-        return { outcome: { outcome: 'selected', optionId: options[0].optionId } };
+        const option = findPermissionOption(options, 'reject_once', 'reject_always');
+        if (!option) throw new Error('No reject option available in permission request');
+        return { outcome: { outcome: 'selected', optionId: option.optionId } };
       }
     }
   }
