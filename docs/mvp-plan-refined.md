@@ -100,7 +100,7 @@ Protocol note:
 | `session/list` | ❌ Not needed | Runtime owns registry |
 | `session/set_mode` | ❌ Post-MVP | Useful, but not required for service MVP |
 | `session/set_config_option` | ❌ Post-MVP | Not part of MVP cut line |
-| `session/close` | ❌ Not used | Runtime closes by ending the process/session locally |
+| `session/close` | ✅ MVP required | Graceful session teardown; compatible agents must support it |
 | unstable ACP methods | ❌ Out | Not part of MVP |
 
 ### Agent -> Client Callbacks
@@ -261,6 +261,7 @@ Required:
 
 - production server promoted from example
 - complete REST + SSE surface
+- graceful session close via ACP `session/close`
 - permission response bridge
 - request validation
 - basic auth
@@ -291,7 +292,7 @@ The MVP is complete only when all of the following are true:
 3. A remote client can cancel an active run without killing the session.
 4. A remote client can respond to delegated permission requests.
 5. Session metadata survives process restarts via `FileSessionStore`.
-6. The service can close sessions cleanly.
+6. The service can close sessions cleanly via ACP `session/close`.
 7. Compatibility boundaries are documented clearly.
 8. At least 2 to 3 compatible agents pass end-to-end validation.
 
@@ -307,6 +308,7 @@ Important:
 This runtime is compatible with ACP agents that:
 
 - work over stdio ACP
+- support `session/close`
 - do not require client-provided filesystem callbacks
 - do not require terminal callbacks
 - do not require runtime-managed MCP configuration
@@ -331,4 +333,3 @@ These are not part of the MVP:
 - multi-tenant hard isolation
 
 The runtime should stay narrow: agent session orchestration as a service.
-
