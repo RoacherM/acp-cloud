@@ -41,7 +41,8 @@ export type SessionEvent =
   | RunCompletedEvent
   | SessionStatusChangedEvent
   | PermissionRequestEvent
-  | PermissionTimeoutEvent;
+  | PermissionTimeoutEvent
+  | StoreErrorEvent;
 
 // ── ACP session/update events (with optional runId) ─────────────────────
 
@@ -166,6 +167,13 @@ export interface PermissionTimeoutEvent {
   type: 'permission_timeout';
   sessionId: string;
   requestId: string;
+}
+
+export interface StoreErrorEvent {
+  type: 'store_error';
+  sessionId: string;
+  operation: string;
+  error: string;
 }
 
 // ── Lifecycle events (emitted by SessionController) ─────────────────────

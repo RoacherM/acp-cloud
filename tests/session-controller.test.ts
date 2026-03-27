@@ -1,5 +1,5 @@
 // tests/session-controller.test.ts
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { AgentPool } from '../src/agent-pool.js';
@@ -312,5 +312,77 @@ describe('SessionController', () => {
 
     record = await store.get(ctrl.sessionId);
     expect(record!.status).toBe('terminated');
+  });
+
+  it('prompt error with live process returns to ready (not stuck busy)', async () => {
+    pool = new AgentPool({ agents: { mock: mockAgentDef } });
+    const store = new MemorySessionStore();
+
+    const ctrl = await SessionController.create({
+      agentId: 'mock',
+      cwd: '/tmp',
+      permissionMode: 'approve-all',
+      pool,
+      store,
+    });
+
+    const sub = ctrl.subscribe();
+    // "error" triggers a throw in mock agent's prompt handler (JSON-RPC error)
+    await ctrl.prompt([{ type: 'text', text: 'error' }]);
+
+    const events: SessionEvent[] = [];
+    for await (const event of sub) {
+      events.push(event);
+      if (event.type === 'run_completed') break;
+    }
+
+    const runCompleted = events.find(e => e.type === 'run_completed') as any;
+    expect(runCompleted.stopReason).toBe('cancelled');
+    expect(ctrl.publicStatus).toBe('ready');
+
+    // Session is still usable — can prompt again
+    const sub2 = ctrl.subscribe();
+    await ctrl.prompt([{ type: 'text', text: 'Hello' }]);
+    for await (const event of sub2) {
+      if (event.type === 'run_completed') break;
+    }
+    expect(ctrl.publicStatus).toBe('ready');
+
+    await ctrl.close();
+  });
+
+  it('close() emits store_error and still completes when store.update fails', async () => {
+    pool = new AgentPool({ agents: { mock: mockAgentDef } });
+    const store = new MemorySessionStore();
+
+    const ctrl = await SessionController.create({
+      agentId: 'mock',
+      cwd: '/tmp',
+      permissionMode: 'approve-all',
+      pool,
+      store,
+    });
+
+    // Make store.update fail after session creation
+    vi.spyOn(store, 'update').mockRejectedValue(new Error('disk full'));
+
+    const sub = ctrl.subscribe();
+    await ctrl.close();
+
+    const events: SessionEvent[] = [];
+    for await (const event of sub) {
+      events.push(event);
+    }
+
+    // store_error should be emitted
+    const storeErrors = events.filter(e => e.type === 'store_error');
+    expect(storeErrors).toHaveLength(1);
+    expect((storeErrors[0] as any).error).toBe('disk full');
+
+    // Lifecycle events should still flow
+    const statusChanged = events.find(e => e.type === 'session_status_changed') as any;
+    expect(statusChanged).toBeTruthy();
+    expect(statusChanged.to).toBe('terminated');
+    expect(statusChanged.reason).toBe('user_closed');
   });
 });

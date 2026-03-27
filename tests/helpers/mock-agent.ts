@@ -79,6 +79,11 @@ function createAgent(connection: AgentSideConnection): Agent {
         log(`permission result: ${JSON.stringify(permResult.outcome)}`);
       }
 
+      // If prompt contains "error", simulate a JSON-RPC error (process stays alive)
+      if (promptText.includes('error')) {
+        throw new Error('Mock agent error');
+      }
+
       // If prompt contains "slow", add a pause to allow cancel to arrive
       const slow = promptText.includes('slow');
 

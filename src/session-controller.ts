@@ -146,11 +146,17 @@ export class SessionController {
     this.eventHub.push({ type: 'run_started', sessionId: this.sessionId, runId });
 
     this.executePrompt(content, runId).catch(() => {
-      // If the run is still active, the agent process likely died.
-      // Don't complete the run here — let handleCrash() drive the
-      // transition via the AgentPool exit callback. Completing here
-      // would return the session to ready, then the crash callback
-      // would see busy→terminated out of order.
+      // Only act if the run is still ours and the process is alive.
+      // If the process died, handleCrash() will drive the transition
+      // via the exit callback — completing here would emit a wrong
+      // busy→ready before the crash handler's ready→terminated.
+      if (
+        this.execution?.activeRunId === runId &&
+        this.execution.handle &&
+        this.pool.isAlive(this.execution.handle)
+      ) {
+        this.completeRun(runId, 'cancelled');
+      }
     });
 
     return {
@@ -287,7 +293,14 @@ export class SessionController {
     this.emitStatusChanged('busy', 'ready', 'run_completed');
 
     this.record.lastActivity = new Date();
-    this.store.update(this.record).catch(() => {});
+    this.store.update(this.record).catch((err) => {
+      this.eventHub.push({
+        type: 'store_error',
+        sessionId: this.sessionId,
+        operation: 'update',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   }
 
   /**
@@ -311,8 +324,18 @@ export class SessionController {
     this.record.status = 'terminated';
     this.record.pid = null;
     this.record.lastActivity = new Date();
-    this.store.update(this.record).catch(() => {});
-    this.eventHub.close();
+    this.store.update(this.record)
+      .catch((err) => {
+        this.eventHub.push({
+          type: 'store_error',
+          sessionId: this.sessionId,
+          operation: 'update',
+          error: err instanceof Error ? err.message : String(err),
+        });
+      })
+      .finally(() => {
+        this.eventHub.close();
+      });
   }
 
   /**
@@ -331,7 +354,16 @@ export class SessionController {
     this.record.status = 'terminated';
     this.record.pid = null;
     this.record.lastActivity = new Date();
-    await this.store.update(this.record);
+    try {
+      await this.store.update(this.record);
+    } catch (err) {
+      this.eventHub.push({
+        type: 'store_error',
+        sessionId: this.sessionId,
+        operation: 'update',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
 
     this.emitStatusChanged(prevStatus, 'terminated', 'user_closed');
     this.eventHub.close();

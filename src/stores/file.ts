@@ -77,8 +77,10 @@ export class FileSessionStore implements SessionStore {
       try {
         const data = await readFile(join(this.dir, file), 'utf-8');
         records.push(reviveDates(JSON.parse(data)));
-      } catch {
-        // Skip corrupted or partial files
+      } catch (err: any) {
+        if (err instanceof SyntaxError) continue; // Corrupted JSON — skip
+        if (err?.code === 'ENOENT') continue;      // Deleted between readdir and read
+        throw err;                                  // Permissions, I/O — surface it
       }
     }
 

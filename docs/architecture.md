@@ -47,7 +47,7 @@ IDE 集成                Zed
 │  │session/update│ │approve-all       │ │Memory · File │    │
 │  │→ RunEvent    │ │approve-reads     │ │Postgres      │    │
 │  │1:1 ACP 映射  │ │deny-all          │ │可插拔接口     │    │
-│  │              │ │非交互: deny|fail  │ │              │    │
+│  │              │ │delegate(交互委托) │ │              │    │
 │  └──────────────┘ └──────────────────┘ └──────────────┘    │
 └──────────────────────────┬──────────────────────────────────┘
                            │ ClientSideConnection
@@ -318,6 +318,9 @@ initialize → session/new → 就绪
                      │ 恢复失败（不可恢复错误 或 strict-load 模式）
                      ▼
                 [terminated]
+
+  注：用户主动关闭 session 时，从 ready/running 均可直达 terminated。
+  关闭流程：cancel pending → ACP session/close → SIGTERM → terminated。
 ```
 
 **状态说明：**
@@ -332,7 +335,7 @@ initialize → session/new → 就绪
 | waking | 启动中 | 是 | 收到新 prompt，重新 spawn + session/load |
 | crashed | 否 | 是 | 非预期死亡，等待恢复 |
 | recovering | 启动中 | 是 | respawn + session/load 或 fallback-new |
-| terminated | 否 | 归档 | 不可恢复，或用户主动关闭 |
+| terminated | 否 | 归档 | 不可恢复，或用户主动关闭（经 ACP `session/close`） |
 
 **TTL 与休眠策略：**
 - `ready` 状态空闲超过 `sessionTTL`（默认 300s，对齐 acpx）→ 进入 `sleeping`

@@ -66,12 +66,9 @@ export class AgentPool {
 
     const handlersRef: ClientHandlers = {
       onSessionUpdate: () => {},
-      onPermissionRequest: async (params) => ({
-        outcome: {
-          outcome: 'selected' as const,
-          optionId: params.options[0].optionId,
-        },
-      }),
+      onPermissionRequest: async () => {
+        throw new Error('Permission request received before handler was wired');
+      },
     };
 
     const client: Client = {
