@@ -54,7 +54,30 @@ function createAgent(connection: AgentSideConnection): Agent {
 
     async prompt(params: PromptRequest): Promise<PromptResponse> {
       const { sessionId } = params;
-      log(`prompt called for session ${sessionId}`);
+      const promptText = params.prompt
+        .filter((b: any) => b.type === 'text')
+        .map((b: any) => b.text)
+        .join('');
+      log(`prompt called for session ${sessionId}: ${promptText.slice(0, 60)}`);
+
+      // If prompt contains "permission", request permission before responding
+      if (promptText.includes('permission')) {
+        log('requesting permission...');
+        const permResult = await connection.requestPermission({
+          sessionId,
+          toolCall: {
+            toolCallId: 'tc-perm-1',
+            title: 'Write to config.json',
+            kind: 'edit',
+            status: 'pending',
+          },
+          options: [
+            { optionId: 'opt-allow', name: 'Allow', kind: 'allow_once' },
+            { optionId: 'opt-reject', name: 'Reject', kind: 'reject_once' },
+          ],
+        });
+        log(`permission result: ${JSON.stringify(permResult.outcome)}`);
+      }
 
       // 1. agent_message_chunk: "Hello from mock agent!"
       await connection.sessionUpdate({

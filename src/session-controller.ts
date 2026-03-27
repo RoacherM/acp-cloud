@@ -1,6 +1,6 @@
 // src/session-controller.ts
 import { randomUUID } from 'node:crypto';
-import type { ContentBlock, StopReason } from '@agentclientprotocol/sdk';
+import type { ContentBlock, StopReason, RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
 import { AgentPool, type AgentHandle } from './agent-pool.js';
 import { PermissionController } from './permission.js';
 import { EventHub } from './event-hub.js';
@@ -14,10 +14,13 @@ import type {
   PermissionMode,
   RunInfo,
   StatusChangeReason,
+  PendingPermission,
 } from './types.js';
 import { derivePublicStatus } from './types.js';
 
 // ── Options ─────────────────────────────────────────────────────────────
+
+const DEFAULT_PERMISSION_TIMEOUT_MS = 30_000;
 
 export interface SessionControllerOptions {
   agentId: string;
@@ -25,6 +28,7 @@ export interface SessionControllerOptions {
   permissionMode: PermissionMode;
   pool: AgentPool;
   store: SessionStore;
+  permissionTimeoutMs?: number;
 }
 
 // ── SessionController ───────────────────────────────────────────────────
@@ -37,6 +41,7 @@ export class SessionController {
   private store: SessionStore;
   private permissionController: PermissionController;
   private eventHub: EventHub;
+  private permissionTimeoutMs: number;
 
   private constructor(
     record: SessionRecord,
@@ -44,6 +49,7 @@ export class SessionController {
     pool: AgentPool,
     store: SessionStore,
     permissionController: PermissionController,
+    permissionTimeoutMs: number,
   ) {
     this.sessionId = record.id;
     this.record = record;
@@ -52,6 +58,7 @@ export class SessionController {
     this.store = store;
     this.permissionController = permissionController;
     this.eventHub = new EventHub();
+    this.permissionTimeoutMs = permissionTimeoutMs;
   }
 
   get publicStatus(): SessionStatus {
@@ -112,7 +119,10 @@ export class SessionController {
 
     const permissionController = new PermissionController(opts.permissionMode);
 
-    return new SessionController(record, execution, opts.pool, opts.store, permissionController);
+    return new SessionController(
+      record, execution, opts.pool, opts.store, permissionController,
+      opts.permissionTimeoutMs ?? DEFAULT_PERMISSION_TIMEOUT_MS,
+    );
   }
 
   /**
@@ -154,13 +164,12 @@ export class SessionController {
     const handle = this.execution!.handle;
 
     handle.handlers.onSessionUpdate = (notification) => {
-      // Override ACP sessionId with our cloud session ID, inject runId
       const event = sessionUpdateToSessionEvent(notification, this.sessionId);
       this.eventHub.push({ ...event, runId });
     };
 
     handle.handlers.onPermissionRequest = async (request) => {
-      return this.permissionController.resolve(request);
+      return this.handlePermissionRequest(request, runId);
     };
 
     const response = await handle.connection.prompt({
@@ -171,12 +180,76 @@ export class SessionController {
     this.completeRun(runId, response.stopReason);
   }
 
+  private async handlePermissionRequest(
+    request: RequestPermissionRequest,
+    runId: string,
+  ): Promise<RequestPermissionResponse> {
+    if (!this.permissionController.shouldDelegate(request)) {
+      return this.permissionController.resolve(request);
+    }
+
+    const requestId = randomUUID();
+    const permissionPromise = new Promise<RequestPermissionResponse>((resolve) => {
+      const timer = setTimeout(() => {
+        this.execution?.pendingPermissions.delete(requestId);
+        const rejectOption = request.options.find(o => o.kind === 'reject_once')
+          ?? request.options.find(o => o.kind === 'reject_always')
+          ?? request.options[0];
+        this.eventHub.push({ type: 'permission_timeout', sessionId: this.sessionId, requestId });
+        resolve({ outcome: { outcome: 'selected', optionId: rejectOption.optionId } });
+      }, this.permissionTimeoutMs);
+
+      const pending: PendingPermission = { runId, resolve, timer };
+      this.execution!.pendingPermissions.set(requestId, pending);
+    });
+
+    this.eventHub.push({
+      type: 'permission_request',
+      sessionId: this.sessionId,
+      runId,
+      requestId,
+      toolCall: {
+        toolCallId: request.toolCall.toolCallId,
+        title: request.toolCall.title,
+        kind: request.toolCall.kind ?? null,
+        status: request.toolCall.status ?? null,
+      },
+      options: request.options.map(o => ({
+        optionId: o.optionId,
+        name: o.name,
+        kind: o.kind,
+      })),
+    });
+
+    return permissionPromise;
+  }
+
+  respondToPermission(requestId: string, optionId: string): void {
+    const pending = this.execution?.pendingPermissions.get(requestId);
+    if (!pending) {
+      throw new Error(`No pending permission request: ${requestId}`);
+    }
+    clearTimeout(pending.timer);
+    this.execution!.pendingPermissions.delete(requestId);
+    pending.resolve({ outcome: { outcome: 'selected', optionId } });
+  }
+
+  private cancelPendingPermissions(): void {
+    if (!this.execution) return;
+    for (const [_id, pending] of this.execution.pendingPermissions) {
+      clearTimeout(pending.timer);
+      pending.resolve({ outcome: { outcome: 'cancelled' } });
+    }
+    this.execution.pendingPermissions.clear();
+  }
+
   /** Cancel any in-flight run, emitting run_completed. Returns true if a run was active. */
   private cancelActiveRun(): boolean {
     if (!this.execution?.activeRunId) return false;
 
     const runId = this.execution.activeRunId;
     this.execution.activeRunId = null;
+    this.cancelPendingPermissions();
     this.eventHub.push({ type: 'run_completed', sessionId: this.sessionId, runId, stopReason: 'cancelled' });
     this.eventHub.clearRunBuffer();
     return true;
@@ -207,6 +280,7 @@ export class SessionController {
   handleCrash(): void {
     if (this.record.status === 'terminated') return;
 
+    this.cancelPendingPermissions();
     const wasBusy = this.cancelActiveRun();
     this.emitStatusChanged(wasBusy ? 'busy' : 'ready', 'terminated', 'agent_crashed');
 

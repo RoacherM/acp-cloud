@@ -178,6 +178,71 @@ describe('SessionController', () => {
     expect(sc.reason).toBe('user_closed');
   });
 
+  it('emits permission_request event in delegate mode', async () => {
+    pool = new AgentPool({ agents: { mock: mockAgentDef } });
+    const store = new MemorySessionStore();
+
+    const ctrl = await SessionController.create({
+      agentId: 'mock',
+      cwd: '/tmp',
+      permissionMode: 'delegate',
+      pool,
+      store,
+    });
+
+    const sub = ctrl.subscribe();
+    const runInfo = await ctrl.prompt([{ type: 'text', text: 'test permission request' }]);
+
+    const events: SessionEvent[] = [];
+    for await (const event of sub) {
+      events.push(event);
+      if (event.type === 'permission_request') {
+        const permEvent = event as any;
+        ctrl.respondToPermission(permEvent.requestId, 'opt-allow');
+      }
+      if (event.type === 'run_completed') break;
+    }
+
+    const permEvents = events.filter(e => e.type === 'permission_request');
+    expect(permEvents).toHaveLength(1);
+    const pe = permEvents[0] as any;
+    expect(pe.runId).toBe(runInfo.id);
+    expect(pe.toolCall.kind).toBe('edit');
+    expect(pe.options).toHaveLength(2);
+
+    await ctrl.close();
+  });
+
+  it('approve-reads delegates write operations', async () => {
+    pool = new AgentPool({ agents: { mock: mockAgentDef } });
+    const store = new MemorySessionStore();
+
+    const ctrl = await SessionController.create({
+      agentId: 'mock',
+      cwd: '/tmp',
+      permissionMode: 'approve-reads',
+      pool,
+      store,
+    });
+
+    const sub = ctrl.subscribe();
+    await ctrl.prompt([{ type: 'text', text: 'test permission request' }]);
+
+    const events: SessionEvent[] = [];
+    for await (const event of sub) {
+      events.push(event);
+      if (event.type === 'permission_request') {
+        const pe = event as any;
+        ctrl.respondToPermission(pe.requestId, 'opt-allow');
+      }
+      if (event.type === 'run_completed') break;
+    }
+
+    expect(events.some(e => e.type === 'permission_request')).toBe(true);
+
+    await ctrl.close();
+  });
+
   it('persists record to store with correct status', async () => {
     pool = new AgentPool({ agents: { mock: mockAgentDef } });
     const store = new MemorySessionStore();
