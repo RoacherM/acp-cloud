@@ -41,22 +41,4 @@ export class MemorySessionStore implements SessionStore {
 
     return records.map(copyRecord);
   }
-
-  async reapStale(maxIdleMs: number): Promise<SessionRecord[]> {
-    const now = Date.now();
-    const reaped: SessionRecord[] = [];
-
-    for (const [id, record] of this.map) {
-      if (
-        record.status === 'sleeping' &&
-        now - record.lastActivity.getTime() > maxIdleMs
-      ) {
-        const updated: SessionRecord = { ...record, status: 'terminated' };
-        this.map.set(id, updated);
-        reaped.push(copyRecord(updated));
-      }
-    }
-
-    return reaped;
-  }
 }
