@@ -67,7 +67,19 @@ All 4xx/5xx responses use a single shape:
 { "error": "Session not found: abc-123" }
 ```
 
-Runtime throw messages are forwarded directly.
+### HTTP Status Code Mapping
+
+The server maps runtime errors to appropriate status codes:
+
+| Status | When |
+|---|---|
+| 400 | Zod validation failure, invalid permissionMode, malformed body |
+| 401 | Missing or invalid Bearer token |
+| 404 | Unknown session ID, unknown agent ID |
+| 409 | Session not in expected state (e.g., prompt while busy, cancel wrong run) |
+| 500 | Unexpected internal errors (store failures, transport errors) |
+
+The server catches runtime throws and classifies them by message pattern. Runtime methods already throw descriptive messages (e.g., `"Session not found: ..."`, `"Cannot prompt: session status is '...'"`, `"Unknown agent: ..."`). The server maps these to the correct status code rather than letting everything fall to 500.
 
 ---
 
@@ -125,14 +137,19 @@ cancelActiveRun()
 ### Required Changes
 
 1. **`AgentHandle`**: add `agentCapabilities` field, populated from `initialize()` response
-2. **`SessionController.close()`**: attempt ACP `session/close` before kill, with timeout
-3. **No changes to `runtime.shutdown()`**: it already calls `ctrl.close()` for each controller — the new `session/close` logic flows through naturally
+2. **`AgentPool.spawn()`**: remove `fs: {}` from `clientCapabilities` — the refined MVP plan says FS must not be advertised (`docs/mvp-plan-refined.md:122`)
+3. **`SessionController.close()`**: attempt ACP `session/close` before kill, with timeout
+4. **`runtime.shutdown()`**: must clear `handleToSession` entries before calling `ctrl.close()`, matching the pattern in `closeSession()`. Without this, `pool.kill()` inside `close()` triggers the exit callback, which finds the mapping still present and calls `handleCrash()` on an already-closing controller. The `status === 'terminated'` guard in `handleCrash` happens to prevent damage today, but relying on that is fragile — explicit mapping cleanup is the correct fix.
+
+### Compatibility Boundary
+
+Compatible agents MUST support `session/close` (per `docs/mvp-plan-refined.md:311`). The capability check + direct kill fallback is a **defensive measure**, not part of the compatibility model. Agents that don't support `session/close` are outside the documented compatibility boundary. The runtime logs a warning when falling back to direct kill.
 
 ### Edge Cases
 
-- Agent doesn't declare `session.close` capability → direct kill (same as today)
+- Agent doesn't declare `session.close` capability → log warning, direct kill (defensive fallback)
 - `session/close` times out after 5s → kill, don't block shutdown
-- `session/close` throws → catch, ignore, kill
+- `session/close` throws → catch, log, kill
 
 ---
 
@@ -147,9 +164,19 @@ SIGTERM / SIGINT received
   3. process.exit(0)
 ```
 
-`runtime.shutdown()` already iterates all controllers and calls `close()`. With the `session/close` improvement above, each agent gets a chance to clean up before being killed.
+`runtime.shutdown()` iterates all controllers and calls `close()`. With the `session/close` improvement and the `handleToSession` cleanup fix, each agent gets a clean teardown.
 
-Shutdown is the caller's responsibility (in `examples/server.ts`), not built into `createServer()`.
+Shutdown is the caller's responsibility (in `examples/server.ts`), not built into `createServer()`. The example must capture the server handle from `serve()`:
+
+```typescript
+const server = serve({ fetch: app.fetch, port: 3000 });
+
+process.on('SIGTERM', async () => {
+  server.close();               // stop accepting new connections first
+  await runtime.shutdown();     // close all sessions (session/close + kill)
+  process.exit(0);
+});
+```
 
 ---
 
@@ -165,15 +192,16 @@ Shutdown is the caller's responsibility (in `examples/server.ts`), not built int
 
 | File | Change |
 |---|---|
-| `src/agent-pool.ts` | `AgentHandle` adds `agentCapabilities` field from initialize response |
+| `src/agent-pool.ts` | `AgentHandle` adds `agentCapabilities`; remove `fs: {}` from capabilities |
 | `src/session-controller.ts` | `close()` adds ACP `session/close` with capability check + timeout |
+| `src/runtime.ts` | `shutdown()` clears `handleToSession` before closing controllers |
 | `src/index.ts` | Export `createServer`, `ServerOptions` |
-| `examples/server.ts` | Slim down to ~15 lines using `createServer` |
+| `examples/server.ts` | Slim down to ~15 lines using `createServer`; capture server handle for shutdown |
 | `package.json` | Add `hono`, `@hono/node-server` |
 
 ### Unchanged Files
 
-- `src/runtime.ts` — API is feature-complete, `shutdown()` already delegates to `close()`
+- `src/runtime.ts` — API methods unchanged; only `shutdown()` cleanup order is fixed
 - `src/events.ts` — no new event types
 - `src/stores/*` — not involved
 - `src/permission.ts` — not involved
