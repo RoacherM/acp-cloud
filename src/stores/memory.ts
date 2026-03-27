@@ -1,7 +1,12 @@
 import type { SessionStore, SessionRecord, SessionFilter } from './interface.js';
 
 function copyRecord(record: SessionRecord): SessionRecord {
-  return { ...record };
+  return {
+    ...record,
+    createdAt: new Date(record.createdAt.getTime()),
+    lastActivity: new Date(record.lastActivity.getTime()),
+    metadata: { ...record.metadata },
+  };
 }
 
 export class MemorySessionStore implements SessionStore {

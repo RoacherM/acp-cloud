@@ -2,8 +2,6 @@
 import type { RequestPermissionRequest, RequestPermissionResponse, PermissionOption } from '@agentclientprotocol/sdk';
 import type { PermissionMode } from './types.js';
 
-const READ_KINDS = new Set(['read', 'search', 'think']);
-
 export class PermissionController {
   constructor(private readonly mode: PermissionMode) {}
 

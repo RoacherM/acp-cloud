@@ -75,6 +75,10 @@ export class EventHub {
               });
             }
           },
+          async return(): Promise<IteratorResult<SessionEvent>> {
+            hub.subscribers.delete(sub);
+            return { done: true, value: undefined };
+          },
         };
       },
     };

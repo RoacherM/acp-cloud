@@ -120,6 +120,19 @@ describe('CloudRuntime', () => {
     ).rejects.toThrow('Max active sessions reached');
   });
 
+  it('admission control rejects when maxAgentProcesses exceeded', async () => {
+    runtime = new CloudRuntime({
+      agents: { mock: mockAgentDef },
+      maxAgentProcesses: 1,
+    });
+
+    await runtime.createSession({ agent: 'mock', cwd: '/tmp' });
+
+    await expect(
+      runtime.createSession({ agent: 'mock', cwd: '/tmp' }),
+    ).rejects.toThrow('Max agent processes reached');
+  });
+
   it('subscribeSession returns empty iterable for unknown session', async () => {
     runtime = new CloudRuntime({ agents: { mock: mockAgentDef } });
     const sub = runtime.subscribeSession('nonexistent');

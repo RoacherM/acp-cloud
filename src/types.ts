@@ -1,5 +1,6 @@
 // src/types.ts
 import type { ContentBlock, StopReason } from '@agentclientprotocol/sdk';
+import type { AgentHandle } from './agent-pool.js';
 
 // ── Permission ──────────────────────────────────────────────────────────
 
@@ -38,8 +39,6 @@ export interface SessionRecord {
 }
 
 // ── Session Execution (Ephemeral) ───────────────────────────────────────
-
-import type { AgentHandle } from './agent-pool.js';
 
 export interface SessionExecution {
   handle: AgentHandle;
