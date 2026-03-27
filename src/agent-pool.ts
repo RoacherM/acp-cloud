@@ -11,6 +11,7 @@ import {
   type SessionNotification,
 } from '@agentclientprotocol/sdk';
 import type { AgentDefinition } from './types.js';
+import { SandboxedFsHandler } from './client-handler.js';
 
 // ── Public interfaces ───────────────────────────────────────────────────
 
@@ -29,6 +30,7 @@ export interface AgentHandle {
 
 export interface AgentPoolConfig {
   agents: Record<string, AgentDefinition>;
+  onProcessExit?: (handle: AgentHandle, code: number | null, signal: string | null) => void;
 }
 
 // ── AgentPool ───────────────────────────────────────────────────────────
@@ -47,7 +49,7 @@ export class AgentPool {
     return Object.keys(this.config.agents);
   }
 
-  async spawn(agentId: string): Promise<AgentHandle> {
+  async spawn(agentId: string, cwd?: string): Promise<AgentHandle> {
     const def = this.config.agents[agentId];
     if (!def) {
       throw new Error(`Unknown agent: ${agentId}`);
@@ -78,6 +80,8 @@ export class AgentPool {
     };
 
     // 5. Create Client that delegates to handlersRef
+    const fsHandler = cwd ? new SandboxedFsHandler(cwd) : null;
+
     const client: Client = {
       async sessionUpdate(notification: SessionNotification): Promise<void> {
         handlersRef.onSessionUpdate(notification);
@@ -85,7 +89,16 @@ export class AgentPool {
       async requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
         return handlersRef.onPermissionRequest(params);
       },
-    };
+      ...(fsHandler ? {
+        async readTextFile(params: { path: string; sessionId: string }): Promise<{ content: string }> {
+          const content = await fsHandler.readTextFile(params.sessionId, params.path);
+          return { content };
+        },
+        async writeTextFile(params: { path: string; content: string; sessionId: string }): Promise<void> {
+          await fsHandler.writeTextFile(params.sessionId, params.path, params.content);
+        },
+      } : {}),
+    } as any;
 
     // 6. Create the client-side ACP connection
     const connection = new ClientSideConnection((_agent: Agent) => client, stream);
@@ -94,8 +107,8 @@ export class AgentPool {
     const initResponse = await connection.initialize({
       protocolVersion: PROTOCOL_VERSION,
       clientCapabilities: {
-        fs: { readTextFile: true, writeTextFile: true },
-        terminal: true,
+        fs: cwd ? { readTextFile: true, writeTextFile: true } : {},
+        terminal: false,
       },
       clientInfo: { name: 'acp-cloud-runtime', version: '0.1.0' },
     });
@@ -121,10 +134,8 @@ export class AgentPool {
       // Crashed = exited unexpectedly (non-zero code or signal, and still tracked)
       if (code !== 0 && code !== null) {
         this.totalCrashed++;
-      } else if (signal !== null) {
-        // Killed by signal — not a crash if we initiated it via kill()
-        // We already removed from handles, so no further tracking needed
       }
+      this.config.onProcessExit?.(handle, code, signal);
     });
 
     return handle;

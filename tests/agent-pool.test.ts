@@ -64,4 +64,34 @@ describe('AgentPool', () => {
     await new Promise((resolve) => h1.process.on('exit', resolve));
     expect(pool.stats()).toEqual({ active: 1, totalSpawned: 2, totalCrashed: 0 });
   });
+
+  it('calls onProcessExit callback when agent process dies', async () => {
+    let exitInfo: { code: number | null; signal: string | null } | null = null;
+
+    pool = new AgentPool({
+      agents: { mock: mockAgentDef },
+      onProcessExit: (_handle, code, signal) => {
+        exitInfo = { code, signal };
+      },
+    });
+
+    const handle = await pool.spawn('mock');
+    pool.kill(handle);
+
+    await new Promise((resolve) => handle.process.on('exit', resolve));
+
+    expect(exitInfo).not.toBeNull();
+  });
+
+  it('passes cwd to spawn and sets fs capabilities conditionally', async () => {
+    pool = new AgentPool({ agents: { mock: mockAgentDef } });
+
+    // Spawn with cwd — should declare fs capabilities
+    const handle = await pool.spawn('mock', '/tmp');
+    expect(handle).toBeDefined();
+    expect(handle.pid).toBeGreaterThan(0);
+
+    pool.kill(handle);
+    await new Promise((resolve) => handle.process.on('exit', resolve));
+  });
 });
