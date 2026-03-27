@@ -224,6 +224,25 @@ export class SessionController {
     return permissionPromise;
   }
 
+  /**
+   * Cancel the active run via ACP session/cancel.
+   * No-op if no run is active.
+   */
+  async cancel(runId?: string): Promise<void> {
+    if (!this.execution?.activeRunId) return;
+
+    if (runId && this.execution.activeRunId !== runId) {
+      throw new Error(`Run ${runId} is not the active run`);
+    }
+
+    this.cancelPendingPermissions();
+    await this.execution.handle.connection.cancel({
+      sessionId: this.record.acpSessionId,
+    });
+    // Agent will return StopReason::Cancelled from prompt(),
+    // which triggers completeRun() naturally.
+  }
+
   respondToPermission(requestId: string, optionId: string): void {
     const pending = this.execution?.pendingPermissions.get(requestId);
     if (!pending) {

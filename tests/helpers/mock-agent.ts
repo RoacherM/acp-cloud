@@ -79,6 +79,9 @@ function createAgent(connection: AgentSideConnection): Agent {
         log(`permission result: ${JSON.stringify(permResult.outcome)}`);
       }
 
+      // If prompt contains "slow", add a pause to allow cancel to arrive
+      const slow = promptText.includes('slow');
+
       // 1. agent_message_chunk: "Hello from mock agent!"
       await connection.sessionUpdate({
         sessionId,
@@ -87,6 +90,10 @@ function createAgent(connection: AgentSideConnection): Agent {
           content: { type: 'text', text: 'Hello from mock agent!' },
         },
       });
+
+      if (slow) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
 
       // 2. tool_call: pending read
       await connection.sessionUpdate({

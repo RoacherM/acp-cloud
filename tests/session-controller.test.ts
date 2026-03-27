@@ -243,6 +243,56 @@ describe('SessionController', () => {
     await ctrl.close();
   });
 
+  it('cancel() sends ACP cancel and run completes with cancelled', async () => {
+    pool = new AgentPool({ agents: { mock: mockAgentDef } });
+    const store = new MemorySessionStore();
+
+    const ctrl = await SessionController.create({
+      agentId: 'mock',
+      cwd: '/tmp',
+      permissionMode: 'approve-all',
+      pool,
+      store,
+    });
+
+    const sub = ctrl.subscribe();
+    // Use 'slow' keyword so mock agent pauses mid-prompt, letting cancel arrive before it finishes
+    const runInfo = await ctrl.prompt([{ type: 'text', text: 'slow hello' }]);
+
+    await ctrl.cancel();
+
+    const events: SessionEvent[] = [];
+    for await (const event of sub) {
+      events.push(event);
+      if (event.type === 'run_completed') break;
+    }
+
+    const runCompleted = events.find(e => e.type === 'run_completed') as any;
+    expect(runCompleted.stopReason).toBe('cancelled');
+    expect(runCompleted.runId).toBe(runInfo.id);
+    expect(ctrl.publicStatus).toBe('ready');
+
+    await ctrl.close();
+  });
+
+  it('cancel() is a no-op when not busy', async () => {
+    pool = new AgentPool({ agents: { mock: mockAgentDef } });
+    const store = new MemorySessionStore();
+
+    const ctrl = await SessionController.create({
+      agentId: 'mock',
+      cwd: '/tmp',
+      permissionMode: 'approve-all',
+      pool,
+      store,
+    });
+
+    await ctrl.cancel();
+    expect(ctrl.publicStatus).toBe('ready');
+
+    await ctrl.close();
+  });
+
   it('persists record to store with correct status', async () => {
     pool = new AgentPool({ agents: { mock: mockAgentDef } });
     const store = new MemorySessionStore();
