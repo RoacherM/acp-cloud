@@ -1,8 +1,15 @@
 // src/index.ts
 export { CloudRuntime } from './runtime.js';
 export { MemorySessionStore } from './stores/memory.js';
+export { FileSessionStore } from './stores/file.js';
 
-export type { SessionEvent, StopReason, ContentBlock } from './events.js';
+export type {
+  SessionEvent,
+  StopReason,
+  ContentBlock,
+  PermissionRequestEvent,
+  PermissionTimeoutEvent,
+} from './events.js';
 export type {
   RuntimeConfig,
   AgentDefinition,

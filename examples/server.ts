@@ -136,6 +136,19 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { closed: true });
     }
 
+    if (method === 'POST' && subpath === '/cancel') {
+      await runtime.cancelRun(sessionId);
+      return json(res, 200, { cancelled: true });
+    }
+
+    const permMatch = subpath.match(/^\/permissions\/([^/]+)\/respond$/);
+    if (method === 'POST' && permMatch) {
+      const requestId = permMatch[1];
+      const body = await parseBody(req);
+      await runtime.respondToPermission(sessionId, requestId, body.optionId);
+      return json(res, 200, { responded: true });
+    }
+
     json(res, 404, { error: 'Not found' });
   } catch (err: any) {
     console.error('Error:', err.message);
