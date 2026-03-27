@@ -143,4 +143,65 @@ describe('CloudRuntime', () => {
     }
     expect(events).toHaveLength(0);
   });
+
+  it('cancelRun cancels active run gracefully', async () => {
+    runtime = new CloudRuntime({ agents: { mock: mockAgentDef } });
+    const info = await runtime.createSession({ agent: 'mock', cwd: '/tmp' });
+
+    const sub = runtime.subscribeSession(info.id);
+    await runtime.promptSession(info.id, [{ type: 'text', text: 'slow Hello' }]);
+
+    await runtime.cancelRun(info.id);
+
+    const events: SessionEvent[] = [];
+    for await (const event of sub) {
+      events.push(event);
+      if (event.type === 'run_completed') break;
+    }
+
+    const runCompleted = events.find(e => e.type === 'run_completed') as any;
+    expect(runCompleted.stopReason).toBe('cancelled');
+
+    const session = await runtime.getSession(info.id);
+    expect(session!.status).toBe('ready');
+  });
+
+  it('cancelRun is no-op for idle session', async () => {
+    runtime = new CloudRuntime({ agents: { mock: mockAgentDef } });
+    const info = await runtime.createSession({ agent: 'mock', cwd: '/tmp' });
+
+    await runtime.cancelRun(info.id);
+    expect((await runtime.getSession(info.id))!.status).toBe('ready');
+  });
+
+  it('cancelRun throws for unknown session', async () => {
+    runtime = new CloudRuntime({ agents: { mock: mockAgentDef } });
+    await expect(runtime.cancelRun('nonexistent')).rejects.toThrow('Session not found');
+  });
+
+  it('respondToPermission resolves pending permission', async () => {
+    runtime = new CloudRuntime({ agents: { mock: mockAgentDef } });
+    const info = await runtime.createSession({
+      agent: 'mock',
+      cwd: '/tmp',
+      permissionMode: 'delegate',
+    });
+
+    const sub = runtime.subscribeSession(info.id);
+    await runtime.promptSession(info.id, [{ type: 'text', text: 'test permission request' }]);
+
+    const events: SessionEvent[] = [];
+    for await (const event of sub) {
+      events.push(event);
+      if (event.type === 'permission_request') {
+        const pe = event as any;
+        await runtime.respondToPermission(info.id, pe.requestId, 'opt-allow');
+      }
+      if (event.type === 'run_completed') break;
+    }
+
+    expect(events.some(e => e.type === 'permission_request')).toBe(true);
+    const runCompleted = events.find(e => e.type === 'run_completed') as any;
+    expect(runCompleted.stopReason).toBe('end_turn');
+  });
 });

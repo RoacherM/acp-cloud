@@ -25,6 +25,7 @@ export class CloudRuntime {
     defaultPermissionMode: PermissionMode;
     maxAgentProcesses: number;
     maxActiveSessions: number;
+    permissionTimeoutMs?: number;
   };
 
   constructor(config: RuntimeConfig) {
@@ -33,6 +34,7 @@ export class CloudRuntime {
       defaultPermissionMode: config.defaultPermissionMode ?? 'approve-all',
       maxAgentProcesses: config.maxAgentProcesses ?? 20,
       maxActiveSessions: config.maxActiveSessions ?? 50,
+      permissionTimeoutMs: config.permissionTimeoutMs,
     };
 
     this.pool = new AgentPool({
@@ -63,6 +65,7 @@ export class CloudRuntime {
         permissionMode: opts.permissionMode ?? this.config.defaultPermissionMode,
         pool: this.pool,
         store: this.store,
+        permissionTimeoutMs: this.config.permissionTimeoutMs,
       });
 
       this.controllers.set(ctrl.sessionId, ctrl);
@@ -119,6 +122,22 @@ export class CloudRuntime {
     const ctrl = this.controllers.get(id);
     if (!ctrl) throw new Error(`Session not found: ${id}`);
     return ctrl.prompt(content);
+  }
+
+  // ── Cancel ───────────────────────────────────────────────────────────
+
+  async cancelRun(sessionId: string, runId?: string): Promise<void> {
+    const ctrl = this.controllers.get(sessionId);
+    if (!ctrl) throw new Error(`Session not found: ${sessionId}`);
+    await ctrl.cancel(runId);
+  }
+
+  // ── Permission Response ──────────────────────────────────────────────
+
+  async respondToPermission(sessionId: string, requestId: string, optionId: string): Promise<void> {
+    const ctrl = this.controllers.get(sessionId);
+    if (!ctrl) throw new Error(`Session not found: ${sessionId}`);
+    ctrl.respondToPermission(requestId, optionId);
   }
 
   // ── Events ──────────────────────────────────────────────────────────
