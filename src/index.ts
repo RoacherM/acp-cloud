@@ -1,13 +1,8 @@
+// src/index.ts
 export { CloudRuntime } from './runtime.js';
-export { Session } from './session.js';
-export { Run } from './run.js';
-export { AgentPool } from './agent-pool.js';
-export { PermissionController } from './permission.js';
-export { SandboxedFsHandler } from './client-handler.js';
 export { MemorySessionStore } from './stores/memory.js';
 
-export { sessionUpdateToRunEvent } from './events.js';
-export type { RunEvent, StopReason, ToolKind, ToolCallStatus, ContentBlock, PermissionOption } from './events.js';
+export type { SessionEvent, StopReason, ContentBlock } from './events.js';
 export type {
   RuntimeConfig,
   AgentDefinition,
@@ -16,7 +11,9 @@ export type {
   SessionFilter,
   CreateSessionOptions,
   PermissionMode,
-  NonInteractivePolicy,
-  RecoveryPolicy,
+  RecordStatus,
   SessionStatus,
+  SessionInfo,
+  RunInfo,
+  StatusChangeReason,
 } from './types.js';
