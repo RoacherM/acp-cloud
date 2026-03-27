@@ -39,6 +39,7 @@ export type SessionEvent =
   | AcpSessionEvent
   | RunStartedEvent
   | RunCompletedEvent
+  | RunErrorEvent
   | SessionStatusChangedEvent
   | PermissionRequestEvent
   | PermissionTimeoutEvent
@@ -189,6 +190,13 @@ export interface RunCompletedEvent {
   sessionId: string;
   runId: string;
   stopReason: StopReason;
+}
+
+export interface RunErrorEvent {
+  type: 'run_error';
+  sessionId: string;
+  runId: string;
+  error: string;
 }
 
 export interface SessionStatusChangedEvent {

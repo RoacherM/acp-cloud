@@ -314,7 +314,7 @@ describe('SessionController', () => {
     expect(record!.status).toBe('terminated');
   });
 
-  it('prompt error with live process returns to ready (not stuck busy)', async () => {
+  it('prompt error with live process emits run_error (not run_completed) and returns to ready', async () => {
     pool = new AgentPool({ agents: { mock: mockAgentDef } });
     const store = new MemorySessionStore();
 
@@ -333,11 +333,15 @@ describe('SessionController', () => {
     const events: SessionEvent[] = [];
     for await (const event of sub) {
       events.push(event);
-      if (event.type === 'run_completed') break;
+      if (event.type === 'run_error') break;
     }
 
-    const runCompleted = events.find(e => e.type === 'run_completed') as any;
-    expect(runCompleted.stopReason).toBe('cancelled');
+    // run_error with actual error message, not a fake cancelled
+    const runError = events.find(e => e.type === 'run_error') as any;
+    expect(runError).toBeTruthy();
+    expect(runError.error).toBeTruthy();
+    expect(events.some(e => e.type === 'run_completed')).toBe(false);
+
     expect(ctrl.publicStatus).toBe('ready');
 
     // Session is still usable — can prompt again

@@ -99,6 +99,7 @@ export function toSessionInfo(
 export type StatusChangeReason =
   | 'prompt_started'
   | 'run_completed'
+  | 'run_error'
   | 'user_closed'
   | 'agent_crashed'
   | 'init_failed';

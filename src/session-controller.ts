@@ -145,7 +145,7 @@ export class SessionController {
     this.eventHub.startRunBuffer(runId);
     this.eventHub.push({ type: 'run_started', sessionId: this.sessionId, runId });
 
-    this.executePrompt(content, runId).catch(() => {
+    this.executePrompt(content, runId).catch((err) => {
       // Only act if the run is still ours and the process is alive.
       // If the process died, handleCrash() will drive the transition
       // via the exit callback — completing here would emit a wrong
@@ -155,7 +155,7 @@ export class SessionController {
         this.execution.handle &&
         this.pool.isAlive(this.execution.handle)
       ) {
-        this.completeRun(runId, 'cancelled');
+        this.failRun(runId, err instanceof Error ? err.message : String(err));
       }
     });
 
@@ -291,6 +291,26 @@ export class SessionController {
     this.eventHub.push({ type: 'run_completed', sessionId: this.sessionId, runId, stopReason });
     this.eventHub.clearRunBuffer();
     this.emitStatusChanged('busy', 'ready', 'run_completed');
+
+    this.record.lastActivity = new Date();
+    this.store.update(this.record).catch((err) => {
+      this.eventHub.push({
+        type: 'store_error',
+        sessionId: this.sessionId,
+        operation: 'update',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+
+  /** End a run due to a transport or agent error (not a normal ACP completion). */
+  private failRun(runId: string, error: string): void {
+    if (this.execution?.activeRunId !== runId) return;
+
+    this.execution.activeRunId = null;
+    this.eventHub.push({ type: 'run_error', sessionId: this.sessionId, runId, error });
+    this.eventHub.clearRunBuffer();
+    this.emitStatusChanged('busy', 'ready', 'run_error');
 
     this.record.lastActivity = new Date();
     this.store.update(this.record).catch((err) => {

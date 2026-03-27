@@ -9,6 +9,7 @@ export type {
   ContentBlock,
   PermissionRequestEvent,
   PermissionTimeoutEvent,
+  RunErrorEvent,
   StoreErrorEvent,
 } from './events.js';
 export type {
