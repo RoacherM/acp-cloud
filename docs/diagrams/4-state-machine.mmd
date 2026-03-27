@@ -1,0 +1,7 @@
+stateDiagram-v2
+    [*] --> ready : createSession() blocks until ready
+    ready --> busy : promptSession()
+    busy --> ready : run completes
+    busy --> terminated : close() or agent crash
+    ready --> terminated : close() or agent crash
+    terminated --> [*]

@@ -1,0 +1,14 @@
+graph TD
+    API["CloudRuntime API<br/>createSession / promptSession<br/>getSession / closeSession<br/>subscribeSession / listAgents"]
+    ADM["Admission Control<br/>maxActiveSessions<br/>maxAgentProcesses"]
+    REG["Session Registry<br/>Map: id → SessionController"]
+    POOL["AgentPool<br/>spawn / kill<br/>onProcessExit callback"]
+    STORE["SessionStore<br/>passive CRUD only"]
+
+    API --> ADM
+    ADM -->|"check limits"| REG
+    REG -->|"per-session ops"| SC["SessionController"]
+    API -->|"crash supervision"| POOL
+    POOL -->|"exit → handleCrash"| REG
+    SC -->|"persist record"| STORE
+    SC -->|"spawn agent"| POOL

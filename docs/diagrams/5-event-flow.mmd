@@ -1,0 +1,24 @@
+sequenceDiagram
+    participant Client
+    participant Runtime as CloudRuntime
+    participant SC as SessionController
+    participant Hub as EventHub
+    participant Agent as ACP Agent
+
+    Client->>Runtime: subscribeSession(id)
+    Runtime->>SC: subscribe()
+    SC->>Hub: subscribe()
+    Hub-->>Client: AsyncIterable
+
+    Client->>Runtime: promptSession(id, content)
+    Runtime->>SC: prompt(content)
+    SC->>Hub: status_changed(ready→busy)
+    SC->>Hub: startRunBuffer(runId)
+    SC->>Hub: run_started
+    SC->>Agent: ACP prompt
+    Agent-->>SC: agent_message_chunk
+    SC->>Hub: agent_message_chunk + runId
+    Hub-->>Client: event stream
+    Agent-->>SC: stopReason
+    SC->>Hub: run_completed
+    SC->>Hub: status_changed(busy→ready)

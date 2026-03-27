@@ -1,0 +1,21 @@
+graph TD
+    SC["SessionController"]
+
+    subgraph "Durable (SessionStore)"
+        REC["SessionRecord<br/>status: ready | terminated"]
+    end
+
+    subgraph "Ephemeral (in-memory)"
+        EXE["SessionExecution<br/>handle + activeRunId"]
+    end
+
+    HUB["EventHub<br/>push / subscribe / buffer"]
+    PERM["PermissionController<br/>approve-all | deny-all"]
+    INFO["SessionInfo (public DTO)<br/>status = ready|busy|terminated<br/>busy derived from activeRunId"]
+
+    SC --> REC
+    SC --> EXE
+    SC --> HUB
+    SC --> PERM
+    REC -->|"derivePublicStatus()"| INFO
+    EXE -->|"activeRunId != null → busy"| INFO

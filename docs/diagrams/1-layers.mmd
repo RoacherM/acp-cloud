@@ -1,0 +1,13 @@
+graph TD
+    L3["Layer 3: HTTP/SSE Server<br/>(transport only)"]
+    L2["Layer 2: CloudRuntime<br/>(id-centric public API)"]
+    SC["SessionController × N<br/>(lifecycle + events)"]
+    INFRA["AgentPool + SessionStore + FsHandler"]
+    L1["Layer 1: ACP SDK<br/>(ClientSideConnection + stdio)"]
+    AGENT["ACP Agent Processes"]
+
+    L3 -->|"REST/SSE"| L2
+    L2 -->|"per-session"| SC
+    SC -->|"spawn/store/fs"| INFRA
+    INFRA -->|"JSON-RPC"| L1
+    L1 -->|"stdio"| AGENT

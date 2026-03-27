@@ -1,0 +1,28 @@
+sequenceDiagram
+    participant Client
+    participant SC as SessionController
+    participant Hub as EventHub
+    participant Pool as AgentPool
+
+    Note over SC: === close() while busy ===
+
+    Client->>SC: close()
+    SC->>Hub: run_completed(cancelled)
+    SC->>Hub: clearRunBuffer()
+    SC->>Pool: kill(handle)
+    SC->>SC: record.status = terminated
+    SC->>Hub: session_status_changed(busy→terminated, user_closed)
+    SC->>Hub: close()
+    Hub-->>Client: stream ends
+
+    Note over SC: === agent crash while busy ===
+
+    Pool-->>SC: handleCrash()
+    SC->>Hub: run_completed(cancelled)
+    SC->>Hub: clearRunBuffer()
+    SC->>SC: record.status = terminated
+    SC->>Hub: session_status_changed(busy→terminated, agent_crashed)
+    SC->>Hub: close()
+    Hub-->>Client: stream ends
+
+    Note over SC: Guarantee: run_completed ALWAYS before session_status_changed
