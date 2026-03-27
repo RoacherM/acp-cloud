@@ -83,11 +83,9 @@ describe('AgentPool', () => {
     expect(exitInfo).not.toBeNull();
   });
 
-  it('passes cwd to spawn and sets fs capabilities conditionally', async () => {
+  it('does not advertise fs capabilities', async () => {
     pool = new AgentPool({ agents: { mock: mockAgentDef } });
-
-    // Spawn with cwd — should declare fs capabilities
-    const handle = await pool.spawn('mock', '/tmp');
+    const handle = await pool.spawn('mock');
     expect(handle).toBeDefined();
     expect(handle.pid).toBeGreaterThan(0);
 

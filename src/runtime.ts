@@ -61,7 +61,6 @@ export class CloudRuntime {
         agentId: opts.agent,
         cwd: opts.cwd,
         permissionMode: opts.permissionMode ?? this.config.defaultPermissionMode,
-        mcpServers: opts.mcpServers,
         pool: this.pool,
         store: this.store,
       });

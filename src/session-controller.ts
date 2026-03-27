@@ -23,7 +23,6 @@ export interface SessionControllerOptions {
   agentId: string;
   cwd: string;
   permissionMode: PermissionMode;
-  mcpServers?: Array<{ name: string; transport: unknown }>;
   pool: AgentPool;
   store: SessionStore;
 }
@@ -71,13 +70,13 @@ export class SessionController {
     const id = randomUUID();
     const now = new Date();
 
-    const handle = await opts.pool.spawn(opts.agentId, opts.cwd);
+    const handle = await opts.pool.spawn(opts.agentId);
 
     let acpSessionId: string;
     try {
       const result = await handle.connection.newSession({
         cwd: opts.cwd,
-        mcpServers: (opts.mcpServers ?? []) as any,
+        mcpServers: [] as any,  // protocol compatibility, not a product capability
       });
       acpSessionId = result.sessionId;
     } catch (err) {

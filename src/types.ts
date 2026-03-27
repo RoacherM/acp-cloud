@@ -108,7 +108,6 @@ export interface CreateSessionOptions {
   agent: string;
   cwd: string;
   permissionMode?: PermissionMode;
-  mcpServers?: Array<{ name: string; transport: unknown }>;
 }
 
 // ── Runtime Config ──────────────────────────────────────────────────────
