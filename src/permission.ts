@@ -43,6 +43,10 @@ export class PermissionController {
         // Fallback: pick first option
         return { outcome: { outcome: 'selected', optionId: options[0].optionId } };
       }
+
+      case 'delegate':
+        // Delegation is handled upstream by SessionController (Task 5)
+        throw new Error('PermissionController.resolve() must not be called in delegate mode');
     }
   }
 }

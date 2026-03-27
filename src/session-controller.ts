@@ -107,6 +107,7 @@ export class SessionController {
     const execution: SessionExecution = {
       handle,
       activeRunId: null,
+      pendingPermissions: new Map(),
     };
 
     const permissionController = new PermissionController(opts.permissionMode);

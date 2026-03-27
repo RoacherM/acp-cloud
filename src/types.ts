@@ -1,10 +1,10 @@
 // src/types.ts
-import type { ContentBlock, StopReason } from '@agentclientprotocol/sdk';
+import type { ContentBlock, StopReason, RequestPermissionResponse } from '@agentclientprotocol/sdk';
 import type { AgentHandle } from './agent-pool.js';
 
 // ── Permission ──────────────────────────────────────────────────────────
 
-export type PermissionMode = 'approve-all' | 'approve-reads' | 'deny-all';
+export type PermissionMode = 'approve-all' | 'approve-reads' | 'deny-all' | 'delegate';
 
 // ── Agent ───────────────────────────────────────────────────────────────
 
@@ -40,9 +40,16 @@ export interface SessionRecord {
 
 // ── Session Execution (Ephemeral) ───────────────────────────────────────
 
+export interface PendingPermission {
+  runId: string;
+  resolve: (resp: RequestPermissionResponse) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 export interface SessionExecution {
   handle: AgentHandle;
   activeRunId: string | null;
+  pendingPermissions: Map<string, PendingPermission>;
 }
 
 // ── Public DTOs ─────────────────────────────────────────────────────────
@@ -118,6 +125,7 @@ export interface RuntimeConfig {
   defaultPermissionMode?: PermissionMode;
   maxAgentProcesses?: number;
   maxActiveSessions?: number;
+  permissionTimeoutMs?: number;
 }
 
 // ── Session Store ───────────────────────────────────────────────────────

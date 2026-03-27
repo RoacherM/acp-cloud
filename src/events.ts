@@ -39,7 +39,9 @@ export type SessionEvent =
   | AcpSessionEvent
   | RunStartedEvent
   | RunCompletedEvent
-  | SessionStatusChangedEvent;
+  | SessionStatusChangedEvent
+  | PermissionRequestEvent
+  | PermissionTimeoutEvent;
 
 // ── ACP session/update events (with optional runId) ─────────────────────
 
@@ -138,6 +140,32 @@ export interface UsageUpdateEvent {
   size: number;
   used: number;
   cost?: Cost | null;
+}
+
+// ── Permission events ────────────────────────────────────────────────────
+
+export interface PermissionRequestEvent {
+  type: 'permission_request';
+  sessionId: string;
+  runId: string;
+  requestId: string;
+  toolCall: {
+    toolCallId: string;
+    title?: string | null;
+    kind?: string | null;
+    status?: string | null;
+  };
+  options: Array<{
+    optionId: string;
+    name: string;
+    kind: 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always';
+  }>;
+}
+
+export interface PermissionTimeoutEvent {
+  type: 'permission_timeout';
+  sessionId: string;
+  requestId: string;
 }
 
 // ── Lifecycle events (emitted by SessionController) ─────────────────────
