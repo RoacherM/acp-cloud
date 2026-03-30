@@ -22,7 +22,7 @@ const server = serve({ fetch: app.fetch, port: PORT }, () => {
 
 const shutdown = async () => {
   console.log('\nShutting down...');
-  server.close();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
   await runtime.shutdown();
   process.exit(0);
 };
