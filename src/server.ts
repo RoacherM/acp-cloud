@@ -1,6 +1,7 @@
 // src/server.ts
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { logger } from 'hono/logger';
 import { streamSSE } from 'hono/streaming';
 import { z, type ZodSchema } from 'zod';
 import type { CloudRuntime } from './runtime.js';
@@ -79,6 +80,7 @@ export function createServer(runtime: CloudRuntime, opts?: ServerOptions): Hono 
   const base = opts?.basePath ?? '';
 
   // CORS
+  app.use('*', logger());
   app.use('*', cors());
 
   // Public routes (no auth)
