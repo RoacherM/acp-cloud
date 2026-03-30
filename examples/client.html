@@ -150,6 +150,7 @@
   </div>
   <span id="status-text">connecting...</span>
   <div class="controls">
+    <input id="token-input" type="password" placeholder="API Key (optional)" style="width:140px;font-size:12px;padding:5px 10px;border-radius:6px;border:1px solid #d2d2d7;background:#fff;color:#1a1a1a;">
     <select id="agent-select"></select>
     <button onclick="newSession()">+ New</button>
     <button class="danger" onclick="closeSession()">Close</button>
@@ -280,32 +281,126 @@ function esc(s) {
 // ── API ──
 
 let workspace = '';
-let apiToken = ''; // Set via URL param ?token=xxx
+let sseReader = null;  // Single SSE connection per session
+let sseAbort = null;   // AbortController for SSE fetch
+const $tokenInput = document.getElementById('token-input');
 
-// Read token from URL
-const urlParams = new URLSearchParams(location.search);
-apiToken = urlParams.get('token') || '';
+// Restore token from sessionStorage (not URL, not localStorage)
+$tokenInput.value = sessionStorage.getItem('acp_token') || '';
+$tokenInput.addEventListener('change', () => {
+  const v = $tokenInput.value.trim();
+  if (v) sessionStorage.setItem('acp_token', v);
+  else sessionStorage.removeItem('acp_token');
+});
 
 function authHeaders(extra = {}) {
   const h = { ...extra };
-  if (apiToken) h['Authorization'] = `Bearer ${apiToken}`;
+  const token = $tokenInput.value.trim();
+  if (token) h['Authorization'] = `Bearer ${token}`;
   return h;
 }
 
 async function loadConfig() {
-  const res = await fetch(`${API}/config`);
-  const config = await res.json();
-  workspace = config.workspace;
+  const res = await fetch(`${API}/config`, { headers: authHeaders() });
+  if (res.ok) {
+    const config = await res.json();
+    workspace = config.workspace;
+  }
+  // If no auth or config fails, server uses cwd as default
 }
 
 async function loadAgents() {
   const res = await fetch(`${API}/agents`, { headers: authHeaders() });
+  if (!res.ok) {
+    addSystem('Failed to load agents — check API key');
+    return;
+  }
   const { agents } = await res.json();
   $agentSelect.innerHTML = agents.map(a => `<option value="${a}">${a}</option>`).join('');
   if (agents.includes('pi')) $agentSelect.value = 'pi';
 }
 
+function disconnectSSE() {
+  if (sseAbort) { sseAbort.abort(); sseAbort = null; }
+  sseReader = null;
+}
+
+function connectSSE() {
+  disconnectSSE();
+  sseAbort = new AbortController();
+
+  (async () => {
+    try {
+      const res = await fetch(`${API}/sessions/${sessionId}/events`, {
+        headers: authHeaders({ 'Accept': 'text/event-stream' }),
+        signal: sseAbort.signal,
+      });
+      const reader = res.body.getReader();
+      sseReader = reader;
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let eventType = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (line.startsWith('event: ')) eventType = line.slice(7).trim();
+          else if (line.startsWith('data: ') && eventType) {
+            handleEvent(eventType, line.slice(6));
+            eventType = '';
+          }
+        }
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') console.error('SSE error:', e);
+    }
+  })();
+}
+
+function handleEvent(type, dataStr) {
+  let d;
+  try { d = JSON.parse(dataStr); } catch { return; }
+
+  if (type === 'session_status_changed') {
+    setStatus(d.to, d.to);
+    if (d.to === 'terminated') disconnectSSE();
+  } else if (type === 'run_started') {
+    currentAgentText = '';
+    agentRow = null;
+    agentBubble = null;
+    thoughtEl = null;
+    showTyping();
+  } else if (type === 'agent_thought_chunk') {
+    appendThought(d.content?.text || '');
+  } else if (type === 'agent_message_chunk') {
+    appendAgentText(d.content?.text || '');
+  } else if (type === 'tool_call') {
+    addTool(d.title, d.kind);
+    showTyping();
+  } else if (type === 'run_completed') {
+    hideTyping();
+    if (d.stopReason !== 'end_turn') addSystem('Run ended: ' + d.stopReason);
+    setStatus('ready', 'ready');
+  } else if (type === 'run_error') {
+    hideTyping();
+    addSystem('Error: ' + d.error);
+    setStatus('ready', 'ready');
+  } else if (type === 'permission_request') {
+    addSystem('Permission: ' + (d.toolCall?.title || '') + ' — auto-approved');
+    fetch(`${API}/sessions/${sessionId}/permissions/${d.requestId}/respond`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ optionId: d.options[0]?.optionId }),
+    });
+  }
+}
+
 async function newSession() {
+  disconnectSSE();
   if (sessionId) {
     await fetch(`${API}/sessions/${sessionId}`, { method: 'DELETE', headers: authHeaders() }).catch(() => {});
   }
@@ -325,6 +420,7 @@ async function newSession() {
     sessionId = data.id;
     addSystem(`${agent} session ready`);
     setStatus('ready', 'ready');
+    connectSSE(); // Single SSE connection for the session lifetime
   } catch (e) {
     addSystem('Error: ' + e.message);
     setStatus('terminated', 'error');
@@ -339,12 +435,6 @@ async function sendPrompt() {
   $prompt.value = '';
   $prompt.style.height = 'auto';
 
-  currentAgentText = '';
-  agentRow = null;
-  agentBubble = null;
-  thoughtEl = null;
-  showTyping();
-
   const res = await fetch(`${API}/sessions/${sessionId}/prompt`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
@@ -352,78 +442,15 @@ async function sendPrompt() {
   });
 
   if (!res.ok) {
-    hideTyping();
     const body = await res.json();
     addSystem('Error: ' + (body.error || 'request failed'));
-    return;
   }
-
-  // SSE — EventSource doesn't support custom headers, so use fetch streaming
-  const sseRes = await fetch(`${API}/sessions/${sessionId}/events`, {
-    headers: authHeaders({ 'Accept': 'text/event-stream' }),
-  });
-  const reader = sseRes.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  function processSSE(raw) {
-    buffer += raw;
-    const lines = buffer.split('\n');
-    buffer = lines.pop(); // keep incomplete line
-    let eventType = '';
-    for (const line of lines) {
-      if (line.startsWith('event: ')) eventType = line.slice(7).trim();
-      else if (line.startsWith('data: ') && eventType) {
-        handleEvent(eventType, line.slice(6));
-        eventType = '';
-      }
-    }
-  }
-
-  function handleEvent(type, dataStr) {
-    let d;
-    try { d = JSON.parse(dataStr); } catch { return; }
-
-    if (type === 'session_status_changed') {
-      setStatus(d.to, d.to);
-    } else if (type === 'agent_thought_chunk') {
-      appendThought(d.content?.text || '');
-    } else if (type === 'agent_message_chunk') {
-      appendAgentText(d.content?.text || '');
-    } else if (type === 'tool_call') {
-      addTool(d.title, d.kind);
-      showTyping();
-    } else if (type === 'run_completed') {
-      hideTyping();
-      if (d.stopReason !== 'end_turn') addSystem('Run ended: ' + d.stopReason);
-      setStatus('ready', 'ready');
-    } else if (type === 'run_error') {
-      hideTyping();
-      addSystem('Error: ' + d.error);
-      setStatus('ready', 'ready');
-    } else if (type === 'permission_request') {
-      addSystem('Permission: ' + (d.toolCall?.title || '') + ' — auto-approved');
-      fetch(`${API}/sessions/${sessionId}/permissions/${d.requestId}/respond`, {
-        method: 'POST',
-        headers: authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ optionId: d.options[0]?.optionId }),
-      });
-    }
-  }
-
-  (async () => {
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        processSSE(decoder.decode(value, { stream: true }));
-      }
-    } catch { /* stream closed */ }
-  })();
+  // Events arrive via the session-level SSE connection (connectSSE)
 }
 
 async function closeSession() {
   if (!sessionId) return;
+  disconnectSSE();
   await fetch(`${API}/sessions/${sessionId}`, { method: 'DELETE', headers: authHeaders() }).catch(() => {});
   sessionId = null;
   addSystem('Session closed.');

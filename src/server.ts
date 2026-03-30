@@ -82,7 +82,7 @@ export function createServer(runtime: CloudRuntime, opts?: ServerOptions): Hono 
   app.use('*', cors());
 
   // Public routes (no auth)
-  const publicPaths = new Set(['/health', '/config', '/']);
+  const publicPaths = new Set(['/health', '/']);
   app.get('/health', (c) => c.json({ status: 'ok' }));
 
   // Auth middleware — skip public paths

@@ -31,7 +31,7 @@ Open http://localhost:3000 for the Web UI.
 API_KEY=my-secret-token node --import tsx examples/server.ts
 ```
 
-All requests require `Authorization: Bearer my-secret-token` header. The Web UI is served without auth (static HTML).
+API requests require `Authorization: Bearer my-secret-token` header. The Web UI page (`/`) and healthcheck (`/health`) are served without auth. Enter the API key in the Web UI's header input field to authenticate API calls from the browser. The token is stored in `sessionStorage` (cleared on tab close, never in URL or localStorage).
 
 ---
 
