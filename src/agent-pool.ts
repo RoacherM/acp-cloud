@@ -8,6 +8,7 @@ import {
   type Agent,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
+  type AgentCapabilities,
   type SessionNotification,
 } from '@agentclientprotocol/sdk';
 import type { AgentDefinition } from './types.js';
@@ -23,6 +24,7 @@ export interface AgentHandle {
   pid: number;
   connection: ClientSideConnection;
   agentInfo: { name: string; version: string };
+  agentCapabilities: AgentCapabilities;
   process: ChildProcess;
   handlers: ClientHandlers;
 }
@@ -85,7 +87,6 @@ export class AgentPool {
     const initResponse = await connection.initialize({
       protocolVersion: PROTOCOL_VERSION,
       clientCapabilities: {
-        fs: {},
         terminal: false,
       },
       clientInfo: { name: 'acp-cloud-runtime', version: '0.1.0' },
@@ -98,6 +99,7 @@ export class AgentPool {
         name: initResponse.agentInfo.name,
         version: initResponse.agentInfo.version,
       },
+      agentCapabilities: initResponse.agentCapabilities ?? {},
       process: child,
       handlers: handlersRef,
     };

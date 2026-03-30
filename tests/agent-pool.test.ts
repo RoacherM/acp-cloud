@@ -83,6 +83,14 @@ describe('AgentPool', () => {
     expect(exitInfo).not.toBeNull();
   });
 
+  it('spawn returns handle with agentCapabilities', async () => {
+    pool = new AgentPool({ agents: { mock: mockAgentDef } });
+    const handle = await pool.spawn('mock');
+    expect(handle.agentCapabilities).toBeDefined();
+    expect(typeof handle.agentCapabilities).toBe('object');
+    pool.kill(handle);
+  });
+
   it('does not advertise fs capabilities', async () => {
     pool = new AgentPool({ agents: { mock: mockAgentDef } });
     const handle = await pool.spawn('mock');
