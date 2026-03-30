@@ -1,4 +1,4 @@
-FROM node:22-bookworm
+FROM node:lts-bookworm
 
 # Dev tools needed by coding agents (bash, git, python, curl, etc.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -17,8 +17,8 @@ USER agent
 WORKDIR /home/agent
 
 # Copy project and install dependencies
-COPY --chown=agent:agent package.json package-lock.json ./
-RUN npm ci --omit=dev
+COPY --chown=agent:agent package.json ./
+RUN npm install --omit=dev
 
 COPY --chown=agent:agent src/ ./src/
 COPY --chown=agent:agent examples/ ./examples/
