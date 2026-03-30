@@ -10,7 +10,17 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const runtime = new CloudRuntime({
   agents: {
-    pi: { command: 'npx', args: ['-y', 'pi-acp'] },
+    pi: {
+      command: 'npx',
+      args: ['-y', 'pi-acp'],
+      env: {
+        OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+        PI_PROVIDER: process.env.PI_PROVIDER || 'openrouter',
+        PI_MODEL: process.env.PI_MODEL || 'moonshotai/kimi-k2.5',
+        // pi-acp spawns pi via PI_ACP_PI_COMMAND; wrapper script passes provider/model flags
+        PI_ACP_PI_COMMAND: join(__dirname, 'pi-wrapper.sh'),
+      },
+    },
     claude: {
       command: 'npx',
       args: ['-y', '@zed-industries/claude-agent-acp'],
