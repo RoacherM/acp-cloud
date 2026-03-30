@@ -6,129 +6,190 @@
 <title>ACP Cloud Runtime</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github.min.css">
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    background: #f8f9fa;
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    color: #1a1a1a;
+    background: #f0f2f5; height: 100vh;
+    display: flex; flex-direction: column; color: #1a1a1a;
   }
 
   /* ── Header ── */
   header {
-    padding: 12px 24px;
-    background: #fff;
-    border-bottom: 1px solid #eee;
-    display: flex;
-    align-items: center;
-    gap: 12px;
+    padding: 10px 20px; background: #fff;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .logo { display: flex; align-items: center; gap: 8px; }
+  .logo-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: #10b981;
     flex-shrink: 0;
   }
-  .logo { display: flex; align-items: center; gap: 10px; }
-  .logo-dot { width: 10px; height: 10px; border-radius: 50%; background: #10b981; }
   .logo-dot.busy { background: #f59e0b; animation: pulse 1.5s infinite; }
   .logo-dot.terminated { background: #ef4444; }
   .logo-dot.connecting { background: #9ca3af; animation: pulse 1.5s infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
-  header h1 { font-size: 15px; font-weight: 600; color: #374151; }
-  #status-text { font-size: 12px; color: #9ca3af; }
-  .controls { margin-left: auto; display: flex; gap: 6px; }
-  .controls select, .controls button {
-    font-size: 13px; padding: 6px 12px; border-radius: 8px;
+  header h1 { font-size: 14px; font-weight: 600; color: #374151; white-space: nowrap; }
+  #status-text { font-size: 11px; color: #9ca3af; }
+  .controls { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+  .controls select, .controls button, .controls input {
+    font-size: 12px; padding: 5px 10px; border-radius: 6px;
     border: 1px solid #e5e7eb; background: #fff; color: #374151;
     cursor: pointer; font-family: inherit; transition: all 0.15s;
   }
   .controls select:hover, .controls button:hover { background: #f3f4f6; border-color: #d1d5db; }
   .controls button.danger { color: #ef4444; }
   .controls button.danger:hover { background: #fef2f2; border-color: #fecaca; }
+  #token-input { width: 130px; cursor: text; }
 
   /* ── Messages ── */
   #messages {
-    flex: 1; overflow-y: auto; padding: 24px 16px;
-    display: flex; flex-direction: column; gap: 16px;
+    flex: 1; overflow-y: auto; padding: 20px 16px;
+    display: flex; flex-direction: column;
   }
   #messages-inner {
-    max-width: 800px; width: 100%; margin: 0 auto;
-    display: flex; flex-direction: column; gap: 16px;
+    max-width: 760px; width: 100%; margin: 0 auto;
+    display: flex; flex-direction: column; gap: 12px;
   }
 
-  .msg-row { display: flex; gap: 10px; }
+  .msg-row { display: flex; gap: 10px; align-items: flex-start; }
   .msg-row.user { flex-direction: row-reverse; }
 
   .avatar {
-    width: 32px; height: 32px; border-radius: 10px; flex-shrink: 0;
+    width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
-    font-size: 14px; font-weight: 600; color: #fff;
+    font-size: 12px; font-weight: 600; color: #fff; margin-top: 2px;
   }
   .avatar.ai { background: linear-gradient(135deg, #6366f1, #8b5cf6); }
   .avatar.user { background: linear-gradient(135deg, #3b82f6, #06b6d4); }
 
+  /* ── Bubbles ── */
   .bubble {
-    padding: 12px 16px; border-radius: 16px; line-height: 1.7;
-    white-space: pre-wrap; word-break: break-word; font-size: 15px;
-    max-width: 85%; position: relative;
+    padding: 10px 14px; border-radius: 14px; line-height: 1.65;
+    word-break: break-word; font-size: 14px; max-width: 80%;
   }
   .msg-row.ai .bubble {
-    background: #fff; color: #1a1a1a; border: 1px solid #f0f0f0;
-    border-bottom-left-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    background: #fff; color: #1a1a1a; border: 1px solid #e8e8e8;
+    border-top-left-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.04);
   }
   .msg-row.user .bubble {
-    background: #3b82f6; color: #fff; border-bottom-right-radius: 4px;
+    background: linear-gradient(135deg, #6366f1, #818cf8); color: #fff;
+    border-top-right-radius: 4px;
   }
 
-  .thought-bubble {
-    padding: 10px 14px; border-radius: 12px; font-size: 13px;
+  /* ── Markdown in bubbles ── */
+  .bubble p { margin: 0 0 8px; }
+  .bubble p:last-child { margin-bottom: 0; }
+  .bubble h1,.bubble h2,.bubble h3,.bubble h4 { margin: 12px 0 6px; font-size: 15px; font-weight: 600; }
+  .bubble h1 { font-size: 17px; } .bubble h2 { font-size: 16px; }
+  .bubble ul, .bubble ol { padding-left: 20px; margin: 4px 0; }
+  .bubble li { margin: 2px 0; }
+  .bubble code {
+    background: #f3f4f6; padding: 1px 5px; border-radius: 4px;
+    font-size: 13px; font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .bubble pre {
+    background: #f8f9fa; border: 1px solid #e5e7eb; border-radius: 8px;
+    padding: 10px 12px; margin: 8px 0; overflow-x: auto;
+  }
+  .bubble pre code {
+    background: none; padding: 0; font-size: 12.5px; line-height: 1.5;
+  }
+  .bubble hr { border: none; border-top: 1px solid #e5e7eb; margin: 10px 0; }
+  .bubble strong { font-weight: 600; }
+  .bubble a { color: #6366f1; text-decoration: underline; }
+  .msg-row.user .bubble a { color: #c7d2fe; }
+  .bubble blockquote {
+    border-left: 3px solid #d1d5db; padding-left: 10px; color: #6b7280;
+    margin: 6px 0;
+  }
+  .bubble table { border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+  .bubble th, .bubble td { border: 1px solid #e5e7eb; padding: 4px 8px; }
+  .bubble th { background: #f9fafb; font-weight: 600; }
+
+  /* ── Thinking ── */
+  .thought-toggle {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 12px; color: #9ca3af; cursor: pointer;
+    padding: 4px 0; user-select: none;
+  }
+  .thought-toggle:hover { color: #6b7280; }
+  .thought-toggle .arrow { transition: transform 0.2s; font-size: 10px; }
+  .thought-toggle .arrow.open { transform: rotate(90deg); }
+  .thought-content {
+    padding: 8px 12px; border-radius: 8px; font-size: 12px;
     color: #9ca3af; background: #f9fafb; border: 1px solid #f3f4f6;
-    font-style: italic; max-height: 80px; overflow-y: auto;
-    line-height: 1.5; max-width: 85%;
+    font-style: italic; max-height: 200px; overflow-y: auto;
+    line-height: 1.5; margin-top: 4px; display: none;
   }
+  .thought-content.show { display: block; }
 
+  /* ── Tool calls ── */
+  .tool-group { display: flex; flex-direction: column; gap: 4px; max-width: 80%; }
   .tool-bubble {
-    padding: 8px 12px; border-radius: 10px; font-size: 13px;
-    color: #6b7280; background: #f9fafb; border-left: 3px solid #6366f1;
-    max-width: 85%; display: flex; align-items: center; gap: 6px;
+    padding: 6px 10px; border-radius: 8px; font-size: 12px;
+    color: #6b7280; background: #fff; border: 1px solid #e8e8e8;
+    border-left: 3px solid #6366f1;
+    display: flex; align-items: center; gap: 6px;
+    transition: all 0.3s;
   }
-  .tool-icon { font-size: 14px; }
+  .tool-bubble.running { border-left-color: #f59e0b; background: #fffbeb; }
+  .tool-bubble.done { border-left-color: #10b981; }
+  .tool-bubble.error { border-left-color: #ef4444; background: #fef2f2; }
+  .tool-icon { font-size: 12px; opacity: 0.6; }
+  .tool-name { font-weight: 500; color: #374151; }
+  .tool-kind { color: #9ca3af; }
+  .tool-status {
+    font-size: 11px; margin-left: auto; padding: 1px 6px;
+    border-radius: 4px; background: #f3f4f6; color: #6b7280;
+  }
+  .tool-bubble.running .tool-status { background: #fef3c7; color: #92400e; }
+  .tool-bubble.done .tool-status { background: #d1fae5; color: #065f46; }
+  .tool-bubble.error .tool-status { background: #fee2e2; color: #991b1b; }
 
+  /* ── System line ── */
   .system-line {
-    text-align: center; font-size: 12px; color: #c0c0c0; padding: 4px 0;
+    text-align: center; font-size: 11px; color: #c0c0c0; padding: 4px 0;
   }
 
+  /* ── Typing ── */
   .typing-indicator {
-    display: inline-flex; gap: 4px; padding: 12px 16px;
-    background: #fff; border-radius: 16px; border: 1px solid #f0f0f0;
-    border-bottom-left-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    display: inline-flex; gap: 4px; padding: 10px 14px;
+    background: #fff; border-radius: 14px; border: 1px solid #e8e8e8;
+    border-top-left-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.04);
   }
   .typing-dot {
-    width: 8px; height: 8px; border-radius: 50%; background: #d1d5db;
+    width: 6px; height: 6px; border-radius: 50%; background: #d1d5db;
     animation: typing 1.4s infinite;
   }
   .typing-dot:nth-child(2) { animation-delay: 0.2s; }
   .typing-dot:nth-child(3) { animation-delay: 0.4s; }
-  @keyframes typing { 0%,60%,100% { opacity: 0.3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-4px); } }
+  @keyframes typing { 0%,60%,100% { opacity: 0.3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
 
   /* ── Input ── */
   #input-area {
-    flex-shrink: 0; padding: 16px; background: #fff; border-top: 1px solid #eee;
+    flex-shrink: 0; padding: 12px 16px; background: #fff;
+    border-top: 1px solid #e5e7eb; box-shadow: 0 -1px 3px rgba(0,0,0,0.04);
   }
   #input-inner {
-    max-width: 800px; margin: 0 auto; display: flex; gap: 10px; align-items: flex-end;
+    max-width: 760px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end;
   }
   #prompt {
-    flex: 1; padding: 12px 16px; border-radius: 14px; border: 1.5px solid #e5e7eb;
-    background: #f9fafb; color: #1a1a1a; font-size: 15px; font-family: inherit;
+    flex: 1; padding: 10px 14px; border-radius: 12px; border: 1.5px solid #e5e7eb;
+    background: #f9fafb; color: #1a1a1a; font-size: 14px; font-family: inherit;
     resize: none; line-height: 1.5; transition: border-color 0.15s;
-    min-height: 44px; max-height: 150px;
+    min-height: 40px; max-height: 140px;
   }
   #prompt:focus { outline: none; border-color: #6366f1; background: #fff; }
   #prompt:disabled { opacity: 0.4; }
   #send {
-    width: 44px; height: 44px; border-radius: 12px; border: none;
-    background: #6366f1; color: white; font-size: 18px; cursor: pointer;
+    width: 40px; height: 40px; border-radius: 10px; border: none;
+    background: #6366f1; color: white; font-size: 16px; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
     transition: background 0.15s; flex-shrink: 0;
   }
@@ -136,9 +197,9 @@
   #send:disabled { opacity: 0.3; cursor: not-allowed; }
 
   /* Scrollbar */
-  #messages::-webkit-scrollbar { width: 5px; }
-  #messages::-webkit-scrollbar-track { background: transparent; }
-  #messages::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 3px; }
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #ddd; border-radius: 3px; }
 </style>
 </head>
 <body>
@@ -146,11 +207,11 @@
 <header>
   <div class="logo">
     <div class="logo-dot connecting" id="dot"></div>
-    <h1>ACP Cloud Runtime</h1>
+    <h1>ACP Cloud</h1>
   </div>
   <span id="status-text">connecting...</span>
   <div class="controls">
-    <input id="token-input" type="password" placeholder="API Key (optional)" style="width:140px;font-size:12px;padding:5px 10px;border-radius:6px;border:1px solid #d2d2d7;background:#fff;color:#1a1a1a;">
+    <input id="token-input" type="password" placeholder="API Key">
     <select id="agent-select"></select>
     <button onclick="newSession()">+ New</button>
     <button class="danger" onclick="closeSession()">Close</button>
@@ -167,21 +228,33 @@
 </div>
 
 <script>
+// ── Markdown setup ──
+marked.setOptions({
+  highlight: (code, lang) => {
+    if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value;
+    return hljs.highlightAuto(code).value;
+  },
+  breaks: true,
+  gfm: true,
+});
+
 const API = location.origin;
 let sessionId = null;
 let currentAgentText = '';
 
-const $inner = document.getElementById('messages-inner');
-const $messages = document.getElementById('messages');
-const $prompt = document.getElementById('prompt');
-const $send = document.getElementById('send');
-const $dot = document.getElementById('dot');
-const $statusText = document.getElementById('status-text');
-const $agentSelect = document.getElementById('agent-select');
+const $ = (id) => document.getElementById(id);
+const $inner = $('messages-inner');
+const $messages = $('messages');
+const $prompt = $('prompt');
+const $send = $('send');
+const $dot = $('dot');
+const $statusText = $('status-text');
+const $agentSelect = $('agent-select');
+const $tokenInput = $('token-input');
 
 $prompt.addEventListener('input', () => {
   $prompt.style.height = 'auto';
-  $prompt.style.height = Math.min($prompt.scrollHeight, 150) + 'px';
+  $prompt.style.height = Math.min($prompt.scrollHeight, 140) + 'px';
 });
 $prompt.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendPrompt(); }
@@ -196,7 +269,17 @@ function setStatus(s, label) {
   if (ready) $prompt.focus();
 }
 
-function scrollBottom() { $messages.scrollTop = $messages.scrollHeight; }
+function scrollBottom() {
+  requestAnimationFrame(() => { $messages.scrollTop = $messages.scrollHeight; });
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+function renderMarkdown(text) {
+  try { return marked.parse(text.trim()); } catch { return esc(text); }
+}
+
+// ── Message rendering ──
 
 function addSystem(text) {
   const div = document.createElement('div');
@@ -214,9 +297,7 @@ function addUserMsg(text) {
   scrollBottom();
 }
 
-let agentRow = null;
-let agentBubble = null;
-let typingEl = null;
+let agentRow = null, agentBubble = null, typingEl = null;
 
 function showTyping() {
   if (typingEl) return;
@@ -232,6 +313,13 @@ function hideTyping() {
   if (typingEl) { typingEl.remove(); typingEl = null; }
 }
 
+function finalizeAgentBubble() {
+  if (agentBubble && currentAgentText) {
+    agentBubble.innerHTML = renderMarkdown(currentAgentText);
+    agentBubble.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
+  }
+}
+
 function appendAgentText(text) {
   hideTyping();
   if (!agentRow) {
@@ -240,58 +328,91 @@ function appendAgentText(text) {
     agentBubble = document.createElement('div');
     agentBubble.className = 'bubble';
     const av = document.createElement('div');
-    av.className = 'avatar ai';
-    av.textContent = 'A';
+    av.className = 'avatar ai'; av.textContent = 'A';
     agentRow.appendChild(av);
     agentRow.appendChild(agentBubble);
     $inner.appendChild(agentRow);
   }
   currentAgentText += text;
-  agentBubble.textContent = currentAgentText;
-  scrollBottom();
+  // Render markdown periodically (throttled)
+  if (!appendAgentText._timer) {
+    appendAgentText._timer = setTimeout(() => {
+      appendAgentText._timer = null;
+      if (agentBubble) {
+        agentBubble.innerHTML = renderMarkdown(currentAgentText);
+      }
+      scrollBottom();
+    }, 100);
+  }
 }
 
-let thoughtEl = null;
+// ── Thinking ──
+let thoughtEl = null, thoughtContent = null, thoughtText = '';
+
 function appendThought(text) {
   if (!thoughtEl) {
-    thoughtEl = document.createElement('div');
-    thoughtEl.className = 'thought-bubble';
-    $inner.appendChild(thoughtEl);
+    thoughtText = '';
+    const wrapper = document.createElement('div');
+    const toggle = document.createElement('div');
+    toggle.className = 'thought-toggle';
+    toggle.innerHTML = `<span class="arrow">&#x25B6;</span> Thinking...`;
+    thoughtContent = document.createElement('div');
+    thoughtContent.className = 'thought-content';
+    toggle.addEventListener('click', () => {
+      const open = thoughtContent.classList.toggle('show');
+      toggle.querySelector('.arrow').classList.toggle('open', open);
+    });
+    wrapper.appendChild(toggle);
+    wrapper.appendChild(thoughtContent);
+    $inner.appendChild(wrapper);
+    thoughtEl = wrapper;
   }
-  thoughtEl.textContent += text;
-  thoughtEl.scrollTop = thoughtEl.scrollHeight;
+  thoughtText += text;
+  thoughtContent.textContent = thoughtText;
+  thoughtContent.scrollTop = thoughtContent.scrollHeight;
   scrollBottom();
 }
 
-function addTool(title, kind) {
+// ── Tool calls ──
+const toolBubbles = new Map();
+
+function toolStatusClass(status) {
+  if (status === 'running' || status === 'in_progress') return ' running';
+  if (status === 'completed') return ' done';
+  if (status === 'error' || status === 'failed') return ' error';
+  return '';
+}
+
+function addTool(id, title, kind, status) {
   hideTyping();
+  finalizeAgentBubble();
+  agentRow = null; agentBubble = null; currentAgentText = '';
+
   const div = document.createElement('div');
-  div.className = 'tool-bubble';
-  div.innerHTML = `<span class="tool-icon">&#x2699;</span> ${esc(title)}${kind ? ' <small>(' + esc(kind) + ')</small>' : ''}`;
+  div.className = 'tool-bubble' + toolStatusClass(status);
+  div.innerHTML = `<span class="tool-icon">&#x2699;</span><span class="tool-name">${esc(title)}</span>${kind ? `<span class="tool-kind">${esc(kind)}</span>` : ''}<span class="tool-status">${esc(status || 'pending')}</span>`;
+  if (id) toolBubbles.set(id, div);
   $inner.appendChild(div);
   scrollBottom();
 }
 
-function esc(s) {
-  const d = document.createElement('div');
-  d.textContent = s || '';
-  return d.innerHTML;
+function updateTool(id, status) {
+  const div = toolBubbles.get(id);
+  if (!div) return;
+  div.className = 'tool-bubble' + toolStatusClass(status);
+  const el = div.querySelector('.tool-status');
+  if (el) el.textContent = status || '';
 }
 
 // ── API ──
 
 let workspace = '';
-let sseReader = null;  // Single SSE connection per session
-let sseAbort = null;   // AbortController for SSE fetch
-const $tokenInput = document.getElementById('token-input');
+let sseAbort = null;
 
-// Restore token from sessionStorage (not URL, not localStorage)
 $tokenInput.value = sessionStorage.getItem('acp_token') || '';
 $tokenInput.addEventListener('change', () => {
   const v = $tokenInput.value.trim();
-  if (v) sessionStorage.setItem('acp_token', v);
-  else sessionStorage.removeItem('acp_token');
-  // Re-initialize with new token
+  if (v) sessionStorage.setItem('acp_token', v); else sessionStorage.removeItem('acp_token');
   init();
 });
 
@@ -303,34 +424,29 @@ function authHeaders(extra = {}) {
 }
 
 async function loadConfig() {
-  const res = await fetch(`${API}/config`, { headers: authHeaders() });
-  if (res.ok) {
-    const config = await res.json();
-    workspace = config.workspace;
-  }
-  // If no auth or config fails, server uses cwd as default
+  try {
+    const res = await fetch(`${API}/config`, { headers: authHeaders() });
+    if (res.ok) workspace = (await res.json()).workspace;
+  } catch {}
 }
 
 async function loadAgents() {
-  const res = await fetch(`${API}/agents`, { headers: authHeaders() });
-  if (!res.ok) {
-    addSystem('Failed to load agents — check API key');
-    return;
-  }
-  const { agents } = await res.json();
-  $agentSelect.innerHTML = agents.map(a => `<option value="${a}">${a}</option>`).join('');
-  if (agents.includes('pi')) $agentSelect.value = 'pi';
+  try {
+    const res = await fetch(`${API}/agents`, { headers: authHeaders() });
+    if (!res.ok) { addSystem('Failed to load agents — check API key'); return; }
+    const { agents } = await res.json();
+    $agentSelect.innerHTML = agents.filter(a => a !== 'mock').map(a => `<option value="${a}">${a}</option>`).join('');
+    if (agents.includes('pi')) $agentSelect.value = 'pi';
+  } catch (e) { addSystem('Connection error: ' + e.message); }
 }
 
 function disconnectSSE() {
   if (sseAbort) { sseAbort.abort(); sseAbort = null; }
-  sseReader = null;
 }
 
 function connectSSE() {
   disconnectSSE();
   sseAbort = new AbortController();
-
   (async () => {
     try {
       const res = await fetch(`${API}/sessions/${sessionId}/events`, {
@@ -338,17 +454,13 @@ function connectSSE() {
         signal: sseAbort.signal,
       });
       const reader = res.body.getReader();
-      sseReader = reader;
       const decoder = new TextDecoder();
-      let buffer = '';
-      let eventType = '';
-
+      let buffer = '', eventType = '';
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
+        const lines = buffer.split('\n'); buffer = lines.pop();
         for (const line of lines) {
           if (line.startsWith('event: ')) eventType = line.slice(7).trim();
           else if (line.startsWith('data: ') && eventType) {
@@ -367,37 +479,51 @@ function handleEvent(type, dataStr) {
   let d;
   try { d = JSON.parse(dataStr); } catch { return; }
 
-  if (type === 'session_status_changed') {
-    setStatus(d.to, d.to);
-    if (d.to === 'terminated') disconnectSSE();
-  } else if (type === 'run_started') {
-    currentAgentText = '';
-    agentRow = null;
-    agentBubble = null;
-    thoughtEl = null;
-    showTyping();
-  } else if (type === 'agent_thought_chunk') {
-    appendThought(d.content?.text || '');
-  } else if (type === 'agent_message_chunk') {
-    appendAgentText(d.content?.text || '');
-  } else if (type === 'tool_call') {
-    addTool(d.title, d.kind);
-    showTyping();
-  } else if (type === 'run_completed') {
-    hideTyping();
-    if (d.stopReason !== 'end_turn') addSystem('Run ended: ' + d.stopReason);
-    setStatus('ready', 'ready');
-  } else if (type === 'run_error') {
-    hideTyping();
-    addSystem('Error: ' + d.error);
-    setStatus('ready', 'ready');
-  } else if (type === 'permission_request') {
-    addSystem('Permission: ' + (d.toolCall?.title || '') + ' — auto-approved');
-    fetch(`${API}/sessions/${sessionId}/permissions/${d.requestId}/respond`, {
-      method: 'POST',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ optionId: d.options[0]?.optionId }),
-    });
+  switch (type) {
+    case 'session_status_changed':
+      setStatus(d.to, d.to);
+      if (d.to === 'terminated') disconnectSSE();
+      break;
+    case 'run_started':
+      currentAgentText = '';
+      agentRow = null; agentBubble = null;
+      thoughtEl = null; thoughtContent = null; thoughtText = '';
+      toolBubbles.clear();
+      showTyping();
+      break;
+    case 'agent_thought_chunk':
+      appendThought(d.content?.text || '');
+      break;
+    case 'agent_message_chunk':
+      appendAgentText(d.content?.text || '');
+      break;
+    case 'tool_call':
+      addTool(d.toolCallId, d.title, d.kind, d.status);
+      showTyping();
+      break;
+    case 'tool_call_update':
+      updateTool(d.toolCallId, d.status);
+      break;
+    case 'run_completed':
+      hideTyping();
+      finalizeAgentBubble();
+      if (d.stopReason !== 'end_turn') addSystem('Run ended: ' + d.stopReason);
+      setStatus('ready', 'ready');
+      break;
+    case 'run_error':
+      hideTyping();
+      finalizeAgentBubble();
+      addSystem('Error: ' + d.error);
+      setStatus('ready', 'ready');
+      break;
+    case 'permission_request':
+      addSystem('Permission: ' + (d.toolCall?.title || '') + ' — auto-approved');
+      fetch(`${API}/sessions/${sessionId}/permissions/${d.requestId}/respond`, {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ optionId: d.options[0]?.optionId }),
+      });
+      break;
   }
 }
 
@@ -409,7 +535,6 @@ async function newSession() {
   sessionId = null;
   $inner.innerHTML = '';
   setStatus('connecting', 'creating session...');
-
   try {
     const agent = $agentSelect.value;
     const res = await fetch(`${API}/sessions`, {
@@ -422,7 +547,7 @@ async function newSession() {
     sessionId = data.id;
     addSystem(`${agent} session ready`);
     setStatus('ready', 'ready');
-    connectSSE(); // Single SSE connection for the session lifetime
+    connectSSE();
   } catch (e) {
     addSystem('Error: ' + e.message);
     setStatus('terminated', 'error');
@@ -432,22 +557,17 @@ async function newSession() {
 async function sendPrompt() {
   const text = $prompt.value.trim();
   if (!text || !sessionId) return;
-
   addUserMsg(text);
-  $prompt.value = '';
-  $prompt.style.height = 'auto';
-
+  $prompt.value = ''; $prompt.style.height = 'auto';
   const res = await fetch(`${API}/sessions/${sessionId}/prompt`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ text }),
   });
-
   if (!res.ok) {
     const body = await res.json();
     addSystem('Error: ' + (body.error || 'request failed'));
   }
-  // Events arrive via the session-level SSE connection (connectSSE)
 }
 
 async function closeSession() {
@@ -468,11 +588,8 @@ async function init() {
   $inner.innerHTML = '';
   await loadConfig();
   await loadAgents();
-  if ($agentSelect.options.length > 0) {
-    await newSession();
-  } else {
-    setStatus('terminated', 'no agents');
-  }
+  if ($agentSelect.options.length > 0) await newSession();
+  else setStatus('terminated', 'no agents');
 }
 
 init();
