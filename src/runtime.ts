@@ -167,18 +167,10 @@ export class CloudRuntime {
   // ── Shutdown ──────────────────────────────────────────────────────
 
   async shutdown(): Promise<void> {
-    // Clear handle→session mappings first so that process exits
-    // during close() don't trigger handleCrash() on closing controllers.
-    for (const ctrl of this.controllers.values()) {
-      const handle = ctrl.getHandle();
-      if (handle) {
-        this.handleToSession.delete(handle);
-      }
-    }
-
-    await Promise.all(
-      Array.from(this.controllers.values()).map(ctrl => ctrl.close()),
-    );
+    // Clear mappings before close so exit callbacks don't trigger handleCrash.
+    this.handleToSession.clear();
+    const ctrls = Array.from(this.controllers.values());
+    await Promise.all(ctrls.map(ctrl => ctrl.close()));
     this.controllers.clear();
     this.pool.killAll();
   }

@@ -20,16 +20,14 @@ class HttpError extends Error {
   }
 }
 
-async function safeJson(c: { req: { json: () => Promise<unknown> } }): Promise<unknown> {
+async function parseJsonBody<T>(c: { req: { json: () => Promise<unknown> } }, schema: ZodSchema<T>): Promise<T> {
+  let raw: unknown;
   try {
-    return await c.req.json();
+    raw = await c.req.json();
   } catch {
     throw new HttpError(400, 'Malformed JSON body');
   }
-}
-
-function parseBody<T>(schema: ZodSchema<T>, body: unknown): T {
-  const result = schema.safeParse(body);
+  const result = schema.safeParse(raw);
   if (!result.success) {
     const message = result.error.issues.map(i => i.message).join('; ');
     throw new HttpError(400, message);
@@ -97,10 +95,10 @@ export function createServer(runtime: CloudRuntime, opts?: ServerOptions): Hono 
   });
 
   app.post(`${base}/sessions`, async (c) => {
-    const body = parseBody(CreateSessionSchema, await safeJson(c));
+    const body = await parseJsonBody(c, CreateSessionSchema);
     const info = await runtime.createSession({
       agent: body.agent,
-      cwd: body.cwd ?? process.cwd(),
+      cwd: body.cwd as string,
       permissionMode: body.permissionMode,
     });
     return c.json(info, 201);
@@ -130,7 +128,7 @@ export function createServer(runtime: CloudRuntime, opts?: ServerOptions): Hono 
   });
 
   app.post(`${base}/sessions/:id/prompt`, async (c) => {
-    const body = parseBody(PromptSchema, await safeJson(c));
+    const body = await parseJsonBody(c, PromptSchema);
     const runInfo = await runtime.promptSession(
       c.req.param('id'),
       [{ type: 'text', text: body.text }],
@@ -144,7 +142,7 @@ export function createServer(runtime: CloudRuntime, opts?: ServerOptions): Hono 
   });
 
   app.post(`${base}/sessions/:id/permissions/:reqId/respond`, async (c) => {
-    const body = parseBody(PermissionRespondSchema, await safeJson(c));
+    const body = await parseJsonBody(c, PermissionRespondSchema);
     await runtime.respondToPermission(
       c.req.param('id'),
       c.req.param('reqId'),

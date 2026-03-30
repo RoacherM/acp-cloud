@@ -343,18 +343,20 @@ export class SessionController {
       // Attempt ACP session/close if agent supports it
       const caps = this.execution.handle.agentCapabilities;
       if (caps.sessionCapabilities?.close) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
         try {
           await Promise.race([
             this.execution.handle.connection.unstable_closeSession({
               sessionId: this.record.acpSessionId,
             }),
-            new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('session/close timeout')), 5000),
-            ),
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(() => reject(new Error('session/close timeout')), 5000);
+            }),
           ]);
         } catch (err) {
-          // Timeout or error — proceed to kill
           process.stderr.write(`[acp-cloud-runtime] session/close failed for ${this.sessionId}: ${err instanceof Error ? err.message : err}\n`);
+        } finally {
+          clearTimeout(timer);
         }
       } else {
         process.stderr.write(`[acp-cloud-runtime] agent does not support session/close, falling back to kill for ${this.sessionId}\n`);
