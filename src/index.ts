@@ -1,5 +1,6 @@
 // src/index.ts
 export { CloudRuntime } from './runtime.js';
+export { createServer } from './server.js';
 export { MemorySessionStore } from './stores/memory.js';
 export { FileSessionStore } from './stores/file.js';
 
@@ -12,6 +13,7 @@ export type {
   RunErrorEvent,
   StoreErrorEvent,
 } from './events.js';
+export type { ServerOptions } from './server.js';
 export type {
   RuntimeConfig,
   AgentDefinition,

@@ -1,0 +1,169 @@
+// src/server.ts
+import { Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
+import { z, type ZodSchema } from 'zod';
+import type { CloudRuntime } from './runtime.js';
+import type { PermissionMode } from './types.js';
+
+// ── Options ─────────────────────────────────────────────────────────────
+
+export interface ServerOptions {
+  apiKey?: string;
+  basePath?: string;
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────
+
+class HttpError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+  }
+}
+
+async function safeJson(c: { req: { json: () => Promise<unknown> } }): Promise<unknown> {
+  try {
+    return await c.req.json();
+  } catch {
+    throw new HttpError(400, 'Malformed JSON body');
+  }
+}
+
+function parseBody<T>(schema: ZodSchema<T>, body: unknown): T {
+  const result = schema.safeParse(body);
+  if (!result.success) {
+    const message = result.error.issues.map(i => i.message).join('; ');
+    throw new HttpError(400, message);
+  }
+  return result.data;
+}
+
+// ── Error classification (centralized — not scattered across routes) ────
+
+function classifyError(err: unknown): { status: number; message: string } {
+  if (err instanceof HttpError) {
+    return { status: err.status, message: err.message };
+  }
+
+  const message = err instanceof Error ? err.message : String(err);
+
+  if (/not found|unknown agent/i.test(message)) {
+    return { status: 404, message };
+  }
+  if (/cannot prompt|not the active run|invalid optionId|no pending permission/i.test(message)) {
+    return { status: 409, message };
+  }
+
+  return { status: 500, message };
+}
+
+// ── Schemas ─────────────────────────────────────────────────────────────
+
+const CreateSessionSchema = z.object({
+  agent: z.string(),
+  cwd: z.string().default(process.cwd()),
+  permissionMode: z.enum(['approve-all', 'approve-reads', 'deny-all', 'delegate']).optional() as z.ZodOptional<z.ZodType<PermissionMode>>,
+});
+
+const PromptSchema = z.object({
+  text: z.string(),
+});
+
+const PermissionRespondSchema = z.object({
+  optionId: z.string(),
+});
+
+// ── Factory ─────────────────────────────────────────────────────────────
+
+export function createServer(runtime: CloudRuntime, opts?: ServerOptions): Hono {
+  const app = new Hono();
+  const base = opts?.basePath ?? '';
+
+  // Auth middleware
+  if (opts?.apiKey) {
+    const expectedToken = opts.apiKey;
+    app.use(`${base}/*`, async (c, next) => {
+      const auth = c.req.header('Authorization');
+      if (auth !== `Bearer ${expectedToken}`) {
+        return c.json({ error: 'Unauthorized' }, 401);
+      }
+      await next();
+    });
+  }
+
+  // ── Routes ──────────────────────────────────────────────────────────
+
+  app.get(`${base}/agents`, (c) => {
+    return c.json({ agents: runtime.listAgents() });
+  });
+
+  app.post(`${base}/sessions`, async (c) => {
+    const body = parseBody(CreateSessionSchema, await safeJson(c));
+    const info = await runtime.createSession({
+      agent: body.agent,
+      cwd: body.cwd ?? process.cwd(),
+      permissionMode: body.permissionMode,
+    });
+    return c.json(info, 201);
+  });
+
+  app.get(`${base}/sessions`, async (c) => {
+    const list = await runtime.listSessions();
+    return c.json(list);
+  });
+
+  app.get(`${base}/sessions/:id`, async (c) => {
+    const info = await runtime.getSession(c.req.param('id'));
+    if (!info) throw new HttpError(404, `Session not found: ${c.req.param('id')}`);
+    return c.json(info);
+  });
+
+  app.get(`${base}/sessions/:id/events`, async (c) => {
+    const id = c.req.param('id');
+    const info = await runtime.getSession(id);
+    if (!info) throw new HttpError(404, `Session not found: ${id}`);
+
+    return streamSSE(c, async (stream) => {
+      for await (const event of runtime.subscribeSession(id)) {
+        await stream.writeSSE({ event: event.type, data: JSON.stringify(event) });
+      }
+    });
+  });
+
+  app.post(`${base}/sessions/:id/prompt`, async (c) => {
+    const body = parseBody(PromptSchema, await safeJson(c));
+    const runInfo = await runtime.promptSession(
+      c.req.param('id'),
+      [{ type: 'text', text: body.text }],
+    );
+    return c.json(runInfo, 202);
+  });
+
+  app.post(`${base}/sessions/:id/cancel`, async (c) => {
+    await runtime.cancelRun(c.req.param('id'));
+    return c.json({ cancelled: true });
+  });
+
+  app.post(`${base}/sessions/:id/permissions/:reqId/respond`, async (c) => {
+    const body = parseBody(PermissionRespondSchema, await safeJson(c));
+    await runtime.respondToPermission(
+      c.req.param('id'),
+      c.req.param('reqId'),
+      body.optionId,
+    );
+    return c.json({ responded: true });
+  });
+
+  app.delete(`${base}/sessions/:id`, async (c) => {
+    await runtime.closeSession(c.req.param('id'));
+    return c.json({ closed: true });
+  });
+
+  // ── Error handler ───────────────────────────────────────────────────
+
+  app.onError((err, c) => {
+    const { status, message } = classifyError(err);
+    return c.json({ error: message }, status as any);
+  });
+
+  return app;
+}
