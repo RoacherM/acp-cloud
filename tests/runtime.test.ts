@@ -133,6 +133,41 @@ describe('CloudRuntime', () => {
     ).rejects.toThrow('Max agent processes reached');
   });
 
+  it('shutdown closes all sessions without triggering crash handler', async () => {
+    runtime = new CloudRuntime({ agents: { mock: mockAgentDef } });
+
+    // Create multiple sessions to increase race window
+    const info1 = await runtime.createSession({ agent: 'mock', cwd: '/tmp' });
+    const info2 = await runtime.createSession({ agent: 'mock', cwd: '/tmp' });
+    const sub1 = runtime.subscribeSession(info1.id);
+    const sub2 = runtime.subscribeSession(info2.id);
+
+    await runtime.shutdown();
+
+    // Give exit callbacks time to fire after shutdown
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    const collectEvents = async (sub: AsyncIterable<any>) => {
+      const events: any[] = [];
+      for await (const event of sub) events.push(event);
+      return events;
+    };
+
+    const events1 = await collectEvents(sub1);
+    const events2 = await collectEvents(sub2);
+    const allEvents = [...events1, ...events2];
+
+    const statusChanges = allEvents.filter(e => e.type === 'session_status_changed');
+    const reasons = statusChanges.map((e: any) => e.reason);
+
+    // Every status change should be user_closed, never agent_crashed
+    expect(reasons.every((r: string) => r === 'user_closed')).toBe(true);
+    expect(reasons).not.toContain('agent_crashed');
+
+    // Re-create runtime so afterEach doesn't call shutdown on a dead instance
+    runtime = new CloudRuntime({ agents: { mock: mockAgentDef } });
+  });
+
   it('subscribeSession returns empty iterable for unknown session', async () => {
     runtime = new CloudRuntime({ agents: { mock: mockAgentDef } });
     const sub = runtime.subscribeSession('nonexistent');
