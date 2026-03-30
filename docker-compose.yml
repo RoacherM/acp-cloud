@@ -7,7 +7,9 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - API_KEY=${API_KEY:-}
       - PORT=3000
+      - WORKSPACE=/home/agent/workspace
     volumes:
       # Agent workspace — mount your project here
-      - ${WORKSPACE:-./workspace}:/home/agent/workspace
+      # Host path configurable via WORKSPACE_HOST env var
+      - ${WORKSPACE_HOST:-./workspace}:/home/agent/workspace
     restart: unless-stopped
