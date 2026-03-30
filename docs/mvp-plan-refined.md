@@ -277,6 +277,7 @@ Deferred work:
 - `session/set_mode`
 - registry integration
 - client SDK / React hooks
+- Web UI: sidebar with session history + message persistence (runtime-side SSE event capture)
 - container sandboxing
 - multi-tenancy
 - Postgres-backed persistence

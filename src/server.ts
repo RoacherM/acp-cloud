@@ -1,5 +1,6 @@
 // src/server.ts
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import { z, type ZodSchema } from 'zod';
 import type { CloudRuntime } from './runtime.js';
@@ -75,6 +76,9 @@ const PermissionRespondSchema = z.object({
 export function createServer(runtime: CloudRuntime, opts?: ServerOptions): Hono {
   const app = new Hono();
   const base = opts?.basePath ?? '';
+
+  // CORS
+  app.use('*', cors());
 
   // Auth middleware
   if (opts?.apiKey) {

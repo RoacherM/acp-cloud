@@ -1,17 +1,38 @@
 // examples/server.ts
 // Run: node --import tsx examples/server.ts
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { serve } from '@hono/node-server';
 import { CloudRuntime, createServer } from '../src/index.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const runtime = new CloudRuntime({
   agents: {
     pi: { command: 'npx', args: ['-y', 'pi-acp'] },
+    claude: {
+      command: 'npx',
+      args: ['-y', '@zed-industries/claude-agent-acp'],
+      env: { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY },
+    },
+    codex: {
+      command: join(__dirname, '..', 'node_modules', '.bin', 'codex-acp'),
+      args: [],
+      env: { OPENAI_API_KEY: process.env.OPENAI_API_KEY },
+    },
     mock: { command: 'node', args: ['--import', 'tsx', 'tests/helpers/mock-agent.ts'] },
   },
 });
 
 const app = createServer(runtime, {
   apiKey: process.env.API_KEY,
+});
+
+// Serve Web UI at root
+app.get('/', (c) => {
+  const html = readFileSync(join(__dirname, 'client.html'), 'utf-8');
+  return c.html(html);
 });
 
 const PORT = Number(process.env.PORT ?? 3000);
