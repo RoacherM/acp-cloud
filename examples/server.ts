@@ -13,13 +13,7 @@ const runtime = new CloudRuntime({
     pi: {
       command: 'npx',
       args: ['-y', 'pi-acp'],
-      env: {
-        OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
-        PI_PROVIDER: process.env.PI_PROVIDER || 'openrouter',
-        PI_MODEL: process.env.PI_MODEL || 'moonshotai/kimi-k2.5',
-        // pi-acp spawns pi via PI_ACP_PI_COMMAND; wrapper script passes provider/model flags
-        PI_ACP_PI_COMMAND: join(__dirname, 'pi-wrapper.sh'),
-      },
+      env: { OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY },
     },
     claude: {
       command: 'npx',
