@@ -22,6 +22,7 @@ import {
   type PromptResponse,
   type CancelNotification,
   type AuthenticateRequest,
+  type CloseSessionRequest,
 } from '@agentclientprotocol/sdk';
 
 // Redirect console.log/info to stderr so stdout stays clean NDJSON.
@@ -37,7 +38,11 @@ function createAgent(connection: AgentSideConnection): Agent {
       return {
         protocolVersion: PROTOCOL_VERSION,
         agentInfo: { name: 'mock-agent', version: '0.0.1' },
-        agentCapabilities: {},
+        agentCapabilities: {
+          sessionCapabilities: {
+            close: {},
+          },
+        },
       };
     },
 
@@ -145,6 +150,11 @@ function createAgent(connection: AgentSideConnection): Agent {
     async cancel(params: CancelNotification): Promise<void> {
       log(`cancel called for session ${params.sessionId}`);
       cancelledSessions.add(params.sessionId);
+    },
+
+    async unstable_closeSession(params: CloseSessionRequest): Promise<{}> {
+      log(`closeSession called for session ${params.sessionId}`);
+      return {};
     },
   };
 }
