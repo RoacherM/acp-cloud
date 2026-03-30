@@ -25,11 +25,14 @@ const runtime = new CloudRuntime({
   },
 });
 
+const WORKSPACE = process.env.WORKSPACE ?? join(__dirname, '..', 'workspace');
+
 const app = createServer(runtime, {
   apiKey: process.env.API_KEY,
+  workspace: WORKSPACE,
 });
 
-// Serve Web UI at root
+// Serve Web UI at root (public — skips auth via publicPaths in createServer)
 app.get('/', (c) => {
   const html = readFileSync(join(__dirname, 'client.html'), 'utf-8');
   return c.html(html);

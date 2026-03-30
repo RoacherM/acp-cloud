@@ -17,8 +17,8 @@ USER agent
 WORKDIR /home/agent
 
 # Copy project and install dependencies
-COPY --chown=agent:agent package.json ./
-RUN npm install --omit=dev
+COPY --chown=agent:agent package.json package-lock.json ./
+RUN npm ci --omit=dev 2>/dev/null || npm install --omit=dev
 
 COPY --chown=agent:agent src/ ./src/
 COPY --chown=agent:agent examples/ ./examples/
@@ -31,6 +31,6 @@ EXPOSE 3000
 
 # Healthcheck
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-  CMD curl -sf http://localhost:${PORT}/agents || exit 1
+  CMD curl -sf http://localhost:${PORT}/health || exit 1
 
 CMD ["node", "--import", "tsx", "examples/server.ts"]

@@ -11,6 +11,7 @@ import type { PermissionMode } from './types.js';
 export interface ServerOptions {
   apiKey?: string;
   basePath?: string;
+  workspace?: string;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -80,10 +81,15 @@ export function createServer(runtime: CloudRuntime, opts?: ServerOptions): Hono 
   // CORS
   app.use('*', cors());
 
-  // Auth middleware
+  // Public routes (no auth)
+  const publicPaths = new Set(['/health', '/config', '/']);
+  app.get('/health', (c) => c.json({ status: 'ok' }));
+
+  // Auth middleware — skip public paths
   if (opts?.apiKey) {
     const expectedToken = opts.apiKey;
-    app.use(`${base}/*`, async (c, next) => {
+    app.use('*', async (c, next) => {
+      if (publicPaths.has(c.req.path)) return next();
       const auth = c.req.header('Authorization');
       if (auth !== `Bearer ${expectedToken}`) {
         return c.json({ error: 'Unauthorized' }, 401);
@@ -93,6 +99,8 @@ export function createServer(runtime: CloudRuntime, opts?: ServerOptions): Hono 
   }
 
   // ── Routes ──────────────────────────────────────────────────────────
+
+  app.get('/config', (c) => c.json({ workspace: opts?.workspace ?? process.cwd() }));
 
   app.get(`${base}/agents`, (c) => {
     return c.json({ agents: runtime.listAgents() });
