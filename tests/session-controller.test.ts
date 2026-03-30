@@ -293,6 +293,30 @@ describe('SessionController', () => {
     await ctrl.close();
   });
 
+  it('close() calls unstable_closeSession when agent supports it', async () => {
+    pool = new AgentPool({ agents: { mock: mockAgentDef } });
+    const store = new MemorySessionStore();
+
+    const ctrl = await SessionController.create({
+      agentId: 'mock',
+      cwd: '/tmp',
+      permissionMode: 'approve-all',
+      pool,
+      store,
+    });
+
+    const handle = ctrl.getHandle()!;
+    expect(handle.agentCapabilities.sessionCapabilities?.close).toBeTruthy();
+
+    // Spy on the connection method
+    const closeSpy = vi.spyOn(handle.connection, 'unstable_closeSession');
+
+    await ctrl.close();
+
+    expect(closeSpy).toHaveBeenCalledOnce();
+    expect(ctrl.publicStatus).toBe('terminated');
+  });
+
   it('persists record to store with correct status', async () => {
     pool = new AgentPool({ agents: { mock: mockAgentDef } });
     const store = new MemorySessionStore();
