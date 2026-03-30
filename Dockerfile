@@ -7,12 +7,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential jq ripgrep fzf \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install pi coding agent + ACP adapter globally
-RUN npm install -g @mariozechner/pi-coding-agent pi-acp
+# Install ACP agents globally
+RUN npm install -g \
+    @mariozechner/pi-coding-agent pi-acp \
+    @zed-industries/claude-agent-acp \
+    @zed-industries/codex-acp @zed-industries/codex-acp-linux-arm64
 
 # Non-root user with sudo
 RUN useradd -m -s /bin/bash agent \
     && echo "agent ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Pre-create agent config dirs (mountable via docker-compose volumes)
+RUN mkdir -p /home/agent/.pi/agent /home/agent/.pi/pi-acp \
+    /home/agent/.codex \
+    && chown -R agent:agent /home/agent/.pi /home/agent/.codex
+
+# Default codex config — uses OpenRouter
+COPY --chown=agent:agent config/codex/config.toml /home/agent/.codex/config.toml
+
 USER agent
 WORKDIR /home/agent
 

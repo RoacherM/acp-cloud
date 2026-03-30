@@ -20,10 +20,13 @@ Open http://localhost:3000 for the Web UI.
 
 | Variable | Required | Description |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | Yes | Anthropic API key for pi / Claude agents |
-| `OPENAI_API_KEY` | No | OpenAI API key for Codex agent |
+| `ANTHROPIC_API_KEY` | For Claude agent | Anthropic API key |
+| `OPENROUTER_API_KEY` | For Pi agent | OpenRouter API key (pi default provider) |
+| `OPENAI_API_KEY` | For Codex agent | OpenAI API key |
 | `API_KEY` | No | Bearer token to protect HTTP API (omit to disable auth) |
 | `PORT` | No | Server port (default: 3000) |
+
+At least one agent API key is needed. Agents without their key will fail at prompt time, not at startup.
 
 ### With Auth
 
@@ -50,8 +53,11 @@ docker run -d \
   --name acp-cloud \
   -p 3000:3000 \
   -e ANTHROPIC_API_KEY=sk-ant-... \
+  -e OPENROUTER_API_KEY=sk-or-... \
+  -e OPENAI_API_KEY=sk-... \
   -e API_KEY=my-secret-token \
   -v $(pwd)/workspace:/home/agent/workspace \
+  -v $(pwd)/config/pi:/home/agent/.pi/agent \
   acp-cloud-runtime
 ```
 
@@ -61,6 +67,8 @@ docker run -d \
 # Create .env file
 cat > .env << EOF
 ANTHROPIC_API_KEY=sk-ant-...
+OPENROUTER_API_KEY=sk-or-...
+OPENAI_API_KEY=sk-...
 API_KEY=my-secret-token
 EOF
 
@@ -96,6 +104,22 @@ Mount your project or workspace directory to `/home/agent/workspace`:
 The agent operates within this directory. Place skill definitions in:
 - `.pi/skills/` for pi-acp
 - `.claude/skills/` for Claude Code agents
+
+### Pi Agent Configuration
+
+Pi reads settings from `~/.pi/agent/settings.json` (inside container: `/home/agent/.pi/agent/settings.json`). Mount your config to customize default provider and model:
+
+```bash
+-v $(pwd)/config/pi:/home/agent/.pi/agent
+```
+
+Default `config/pi/settings.json`:
+```json
+{
+  "defaultProvider": "openrouter",
+  "defaultModel": "moonshotai/kimi-k2.5"
+}
+```
 
 ---
 

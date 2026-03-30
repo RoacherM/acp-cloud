@@ -4,12 +4,22 @@ services:
     ports:
       - "${PORT:-3000}:3000"
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # --- Agent API keys (set in .env) ---
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-https://openrouter.ai/api}
+      - ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN:-${OPENROUTER_API_KEY:-}}
+      # --- Claude Code model mapping ---
+      - ANTHROPIC_DEFAULT_HAIKU_MODEL=${ANTHROPIC_DEFAULT_HAIKU_MODEL:-moonshotai/kimi-k2.5}
+      - ANTHROPIC_DEFAULT_SONNET_MODEL=${ANTHROPIC_DEFAULT_SONNET_MODEL:-moonshotai/kimi-k2.5}
+      - ANTHROPIC_DEFAULT_OPUS_MODEL=${ANTHROPIC_DEFAULT_OPUS_MODEL:-moonshotai/kimi-k2.5}
+      # --- Server config ---
       - API_KEY=${API_KEY:-}
       - PORT=3000
       - WORKSPACE=/home/agent/workspace
     volumes:
       # Agent workspace — mount your project here
-      # Host path configurable via WORKSPACE_HOST env var
       - ${WORKSPACE_HOST:-./workspace}:/home/agent/workspace
+      # Pi settings (defaultProvider, defaultModel, etc.)
+      - ${PI_CONFIG_HOST:-./config/pi}:/home/agent/.pi/agent
     restart: unless-stopped

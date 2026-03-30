@@ -11,19 +11,26 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtime = new CloudRuntime({
   agents: {
     pi: {
-      command: 'npx',
-      args: ['-y', 'pi-acp'],
+      command: 'pi-acp',
+      args: [],
       env: { OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY },
     },
     claude: {
-      command: 'npx',
-      args: ['-y', '@zed-industries/claude-agent-acp'],
-      env: { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY },
+      command: 'claude-agent-acp',
+      args: [],
+      env: {
+        ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
+        ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN,
+        ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL,
+        ANTHROPIC_DEFAULT_SONNET_MODEL: process.env.ANTHROPIC_DEFAULT_SONNET_MODEL,
+        ANTHROPIC_DEFAULT_OPUS_MODEL: process.env.ANTHROPIC_DEFAULT_OPUS_MODEL,
+      },
     },
     codex: {
-      command: join(__dirname, '..', 'node_modules', '.bin', 'codex-acp'),
+      command: 'codex-acp',
       args: [],
-      env: { OPENAI_API_KEY: process.env.OPENAI_API_KEY },
+      env: { OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY },
     },
     mock: { command: 'node', args: ['--import', 'tsx', 'tests/helpers/mock-agent.ts'] },
   },
