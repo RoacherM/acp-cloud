@@ -291,6 +291,8 @@ $tokenInput.addEventListener('change', () => {
   const v = $tokenInput.value.trim();
   if (v) sessionStorage.setItem('acp_token', v);
   else sessionStorage.removeItem('acp_token');
+  // Re-initialize with new token
+  init();
 });
 
 function authHeaders(extra = {}) {
@@ -457,7 +459,23 @@ async function closeSession() {
   setStatus('terminated', 'closed');
 }
 
-loadConfig().then(loadAgents).then(newSession);
+async function init() {
+  disconnectSSE();
+  if (sessionId) {
+    await fetch(`${API}/sessions/${sessionId}`, { method: 'DELETE', headers: authHeaders() }).catch(() => {});
+    sessionId = null;
+  }
+  $inner.innerHTML = '';
+  await loadConfig();
+  await loadAgents();
+  if ($agentSelect.options.length > 0) {
+    await newSession();
+  } else {
+    setStatus('terminated', 'no agents');
+  }
+}
+
+init();
 </script>
 </body>
 </html>
