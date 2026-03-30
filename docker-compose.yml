@@ -1,0 +1,13 @@
+services:
+  acp-cloud:
+    build: .
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - API_KEY=${API_KEY:-}
+      - PORT=3000
+    volumes:
+      # Agent workspace — mount your project here
+      - ${WORKSPACE:-./workspace}:/home/agent/workspace
+    restart: unless-stopped

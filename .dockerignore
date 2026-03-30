@@ -1,0 +1,8 @@
+node_modules
+workspace
+.git
+tasks
+docs/superpowers
+*.md
+!package.json
+!tsconfig.json
