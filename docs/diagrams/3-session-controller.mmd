@@ -10,7 +10,7 @@ graph TD
     end
 
     HUB["EventHub<br/>push / subscribe / buffer"]
-    PERM["PermissionController<br/>approve-all | deny-all"]
+    PERM["PermissionController<br/>approve-all | deny-all | approve-reads | delegate"]
     INFO["SessionInfo (public DTO)<br/>status = ready|busy|terminated<br/>busy derived from activeRunId"]
 
     SC --> REC

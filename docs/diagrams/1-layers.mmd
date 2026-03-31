@@ -2,7 +2,7 @@ graph TD
     L3["Layer 3: HTTP/SSE Server<br/>(transport only)"]
     L2["Layer 2: CloudRuntime<br/>(id-centric public API)"]
     SC["SessionController × N<br/>(lifecycle + events)"]
-    INFRA["AgentPool + SessionStore + FsHandler"]
+    INFRA["AgentPool + SessionStore + PermissionController"]
     L1["Layer 1: ACP SDK<br/>(ClientSideConnection + stdio)"]
     AGENT["ACP Agent Processes"]
 

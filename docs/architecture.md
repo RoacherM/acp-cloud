@@ -1,401 +1,438 @@
-# ACP Cloud Runtime — 架构总览
+# ACP Cloud Runtime — Architecture Overview
 
-## 定位
+## Positioning
 
-ACP 生态的缺失拼图：将任意 ACP Agent（注册表 28+ 个）变为可通过 HTTP/SSE 访问的云端服务。
+The missing piece of the ACP ecosystem: turn any ACP Agent into a cloud service accessible via HTTP/SSE.
 
 ```
-生态角色                项目
+Ecosystem Role            Project
 ─────────────────────────────────────────
-协议规范                ACP (agentclientprotocol.com)
-协议 SDK               @agentclientprotocol/sdk
-Agent 适配器            claude-agent-acp, codex-acp, + 26 原生 agent
-IDE 集成                Zed
-云端运行时 ←            本项目（缺失拼图）
+Protocol Spec             ACP (agentclientprotocol.com)
+Protocol SDK              @agentclientprotocol/sdk
+Agent Adapters            claude-agent-acp, codex-acp, + native agents
+IDE Integration           Zed
+Cloud Runtime ←           This project (the missing piece)
 ```
 
-## 三层架构
+## Two-Layer Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    前端 / API 调用方                          │
-│              React 应用 · CLI 工具 · 第三方客户端              │
+│                    Frontend / API Callers                     │
+│              Web Apps · CLI Tools · Third-Party Clients       │
 └──────────────────────────┬──────────────────────────────────┘
                            │ HTTP + SSE
 ┌──────────────────────────┴──────────────────────────────────┐
-│  第三层 · HTTP/SSE 服务（可选，基于第二层构建）                  │
+│  Layer 2 · HTTP/SSE Server (optional, built on Layer 1)      │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐   │
-│  │ REST API │ │SSE 推流器│ │ 权限桥接  │ │认证 & 多租户 │   │
-│  │ /agents  │ │事件扇出  │ │SSE→POST  │ │  中间件      │   │
-│  │/sessions │ │分发      │ │响应      │ │              │   │
-│  │ /runs    │ │          │ │          │ │              │   │
+│  │ REST API │ │SSE Stream│ │Permission│ │  Auth        │   │
+│  │ /agents  │ │ Event    │ │ Bridge   │ │  Middleware   │   │
+│  │/sessions │ │ Fan-out  │ │SSE→POST  │ │  (API key)   │   │
+│  │ /prompt  │ │          │ │ Respond  │ │              │   │
 │  └──────────┘ └──────────┘ └──────────┘ └──────────────┘   │
 └──────────────────────────┬──────────────────────────────────┘
                            │ CloudRuntime API
 ┌──────────────────────────┴──────────────────────────────────┐
-│  第二层 · 核心 SDK（主要交付物）                               │
+│  Layer 1 · Core SDK (primary deliverable)                    │
 │                                                              │
 │  ┌────────────────────────┐ ┌────────────────────────────┐  │
-│  │       会话管理器        │ │       Agent 进程池          │  │
-│  │ 创建·持久化·恢复·取消   │ │ 启动·复用·监控·终止         │  │
-│  │ 三层ID: 运行时/ACP/原生 │ │ TTL 保活 · 崩溃检测        │  │
-│  │ 恢复: strict/fallback  │ │ 分发解析器 · Agent 安装器   │  │
+│  │   SessionController    │ │       AgentPool             │  │
+│  │ Create · Prompt · Close│ │ Spawn · Kill · Exit detect  │  │
+│  │ Two IDs: id + acpSess. │ │ child_process.spawn         │  │
+│  │ Run lifecycle tracking │ │                             │  │
 │  └────────────────────────┘ └────────────────────────────┘  │
 │                                                              │
 │  ┌──────────────┐ ┌──────────────────┐ ┌──────────────┐    │
-│  │   事件总线    │ │    权限控制器     │ │   会话存储    │    │
-│  │session/update│ │approve-all       │ │Memory · File │    │
-│  │→ RunEvent    │ │approve-reads     │ │Postgres      │    │
-│  │1:1 ACP 映射  │ │deny-all          │ │可插拔接口     │    │
-│  │              │ │delegate(交互委托) │ │              │    │
+│  │   EventHub   │ │ PermissionCtrl   │ │ SessionStore │    │
+│  │ Per-session   │ │approve-all       │ │Memory · File │    │
+│  │ event stream  │ │approve-reads     │ │Pluggable     │    │
+│  │ Run buffering │ │deny-all          │ │  interface   │    │
+│  │ + replay      │ │delegate (to SSE) │ │              │    │
 │  └──────────────┘ └──────────────────┘ └──────────────┘    │
 └──────────────────────────┬──────────────────────────────────┘
                            │ ClientSideConnection
 ┌──────────────────────────┴──────────────────────────────────┐
-│  第一层 · @agentclientprotocol/sdk（直接依赖，不修改）         │
+│  Layer 0 · @agentclientprotocol/sdk (direct dependency)      │
 │  ┌──────────────────┐ ┌────────────┐ ┌──────────────────┐  │
-│  │ClientSideConn.   │ │ndJsonStream│ │   协议类型定义     │  │
-│  │JSON-RPC 双向通信  │ │stdio↔NDJSON│ │SessionUpdate etc.│  │
+│  │ClientSideConn.   │ │ndJsonStream│ │ Protocol types   │  │
+│  │JSON-RPC bidir    │ │stdio↔NDJSON│ │SessionUpdate etc.│  │
 │  └──────────────────┘ └────────────┘ └──────────────────┘  │
 └──────────────────────────┬──────────────────────────────────┘
-                           │ stdio（stdin/stdout NDJSON）
+                           │ stdio (stdin/stdout NDJSON)
 ┌──────────────────────────┴──────────────────────────────────┐
-│  ACP Agent 进程（注册表 28+ 个，原样启动无需修改）              │
+│  ACP Agent Processes (launched as-is, no modifications)      │
 │                                                              │
 │  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐              │
 │  │ Claude │ │ Codex  │ │ Gemini │ │Copilot │              │
-│  │适配器  │ │适配器  │ │原生ACP │ │原生ACP │              │
-│  └────────┘ └────────┘ └────────┘ └────────┘              │
-│  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐              │
-│  │ Goose  │ │ Cline  │ │ Cursor │ │+20 更多│              │
-│  │原生    │ │原生    │ │原生    │ │注册表  │              │
+│  │adapter │ │adapter │ │native  │ │native  │              │
 │  └────────┘ └────────┘ └────────┘ └────────┘              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## 资源模型
+## Resource Model
 
-对标 LangGraph Platform 的资源抽象：
+Modeled after LangGraph Platform resource abstractions:
 
 ```
-ACP Cloud Runtime     LangGraph Platform    说明
+ACP Cloud Runtime     LangGraph Platform    Description
 ─────────────────────────────────────────────────────
-Agent                 Assistant             注册表中的 agent 类型
-Session               Thread                持久化对话会话，绑定一个 agent 进程
-Run                   Run                   一次 prompt → response 生命周期
-Event                 Stream event          细粒度 SSE 事件（1:1 ACP session/update）
+Agent                 Assistant             Agent type from config
+Session               Thread                Persistent conversation, bound to one agent process
+Run                   Run                   One prompt → response lifecycle
+Event                 Stream event          Fine-grained SSE events (1:1 ACP session/update mapping)
 ```
 
-## 关键数据流
+## Key Data Flows
 
-### 0. 并发模型
+### 0. Concurrency Model
 
-#### 部署约束：单实例
+#### Deployment Constraint: Single Instance
 
-当前版本仅单实例部署。不做跨实例 session 迁移、分布式锁或 shared-nothing 集群。
-
-```
-总吞吐 = min(活跃会话并行数, maxAgentProcesses, 主机 CPU/内存瓶颈)
-```
-
-#### 全局资源上限
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `maxAgentProcesses` | 20 | 最大并发 agent 进程数（running + ready） |
-| `maxActiveSessions` | 50 | 最大非终止状态 session 数（含 sleeping） |
-| `sessionTTL` | 300s | 空闲 → sleeping |
-| `sleepTTL` | 24h | sleeping → terminated |
-| `maxQueueDepth` | 8 | 单 session prompt 队列上限 |
-
-#### 资源回收优先级
-
-两种上限触发不同的回收策略：
+Current version is single-instance only. No cross-instance session migration, distributed locks, or shared-nothing clustering.
 
 ```
-达到 maxAgentProcesses（进程槽满）:
-  回收目标：释放进程
-  1. ready 状态，按空闲时长倒序（kill 进程 → 转为 sleeping）
-  2. 无可回收 → 拒绝新 session（503）
-  ✗ sleeping 无进程，不参与进程槽回收
-  ✗ 绝不回收：running / waking / recovering / creating / initializing
-
-达到 maxActiveSessions（session 记录满）:
-  回收目标：释放 session 记录
-  1. sleeping 状态，按空闲时长倒序（terminated，释放记录）
-  2. 无可回收 → 拒绝新 session（503）
-  ✗ 绝不终止有进程的活跃 session
+Total throughput = min(active session concurrency, maxAgentProcesses, host CPU/memory)
 ```
 
-#### 每 Session 串行，Session 间并行
+#### Global Resource Limits
 
-**核心约束：一个 Session 同一时刻只有一个活跃 Run。**
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `maxAgentProcesses` | 20 | Max concurrent agent processes |
+| `maxActiveSessions` | 50 | Max non-terminated sessions |
+| `defaultPermissionMode` | `approve-all` | Default permission mode for new sessions |
+| `permissionTimeoutMs` | 30000 | Timeout before auto-rejecting delegated permission requests |
 
-这是 ACP 协议的固有语义 —— `session/prompt` 是 request-response 对，agent 必须响应后才算 turn 结束。acpx、codex-acp、claude-agent-acp 均遵循此模型。
+#### Admission Control
 
-**不同 Session 完全并行。** Session A 的 run 不阻塞 Session B。每个 Session 有独立的 agent 进程和 `ClientSideConnection`。
+When limits are reached, new session creation is rejected:
 
 ```
-客户端 A                  云端运行时（串行队列）             Agent
+controllers.size + pendingCreations >= maxActiveSessions → Error('Max active sessions reached')
+controllers.size + pendingCreations >= maxAgentProcesses → Error('Max agent processes reached')
+```
+
+There is no TTL-based sleep/wake cycle or resource reclamation. Sessions stay alive until explicitly closed or the agent process crashes.
+
+#### Per-Session Serial, Inter-Session Parallel
+
+**Core constraint: one Session has at most one active Run at a time.**
+
+This is an inherent ACP protocol semantic -- `session/prompt` is request-response; the agent must respond before the turn ends.
+
+**Different Sessions run fully in parallel.** Session A's run does not block Session B. Each Session has its own agent process and `ClientSideConnection`.
+
+```
+Client A                  Cloud Runtime                    Agent
   │                           │                              │
-  │ POST prompt "修复登录"     │                              │
-  │──────────────────────────>│ enqueue → 队列为空 → 立即执行  │
+  │ POST prompt "fix login"   │                              │
+  │──────────────────────────>│ status=ready → execute       │
   │                           │ session/prompt ──────────────>│
-  │  SSE: 事件流...           │<─────────────────────────────│
+  │  SSE: events...           │<─────────────────────────────│
   │<──────────────────────────│                              │
   │                           │                              │
-客户端 B                      │                              │
-  │ POST prompt "加个功能"     │                              │
-  │──────────────────────────>│ enqueue → 队列非空 → 排队等待  │
-  │  202 Accepted (queued)    │                              │
-  │<──────────────────────────│                              │
-  │                           │                              │
-  │                           │ run_complete (修复登录)       │
-  │                           │<─────────────────────────────│
-  │                           │                              │
-  │                           │ 出队 → 执行下一个             │
-  │                           │ session/prompt ──────────────>│
-  │  SSE: 事件流...           │<─────────────────────────────│
+Client B                      │                              │
+  │ POST prompt "add feature" │                              │
+  │──────────────────────────>│ status=busy → 409 Conflict   │
+  │  409 "Cannot prompt:      │                              │
+  │   session status is busy" │                              │
   │<──────────────────────────│                              │
 ```
 
-**规则：**
-- 队列深度上限：可配置（默认 8），超限返回 `429 Too Many Requests`
-- `POST /cancel` 作用于**当前活跃 run**（发送 ACP `session/cancel`）
-- 队列中的待执行 prompt 可通过 `DELETE /sessions/:id/queue/:runId` 移除
-- 客户端断开 SSE 不影响 run 执行（run 继续完成，结果写入 session 历史）
+**Rules:**
+- If a session is `busy`, new prompts are rejected with an error (no queue)
+- `POST /sessions/:id/cancel` sends ACP `session/cancel` to the agent
+- Client SSE disconnect does not affect run execution (run continues, events buffer for replay)
 
 ---
 
-### 1. 提示词 → 响应
+### 1. Prompt → Response
 
 ```
-客户端                   云端运行时                   Agent 进程
-  │                         │                           │
-  │ POST /sessions/:id/     │                           │
-  │      prompt             │                           │
-  │────────────────────────>│ 入队 → 队列空 → 立即执行   │
-  │                         │ session/prompt             │
-  │                         │─────────────────────────>│
-  │                         │                           │
-  │                         │ session/update             │
-  │                         │  (agent_message_chunk)     │
-  │  SSE: agent_message_    │<─────────────────────────│
-  │       chunk             │                           │
-  │<────────────────────────│ session/update             │
-  │                         │  (tool_call)               │
-  │  SSE: tool_call         │<─────────────────────────│
-  │<────────────────────────│                           │
-  │                         │ session/update             │
-  │  SSE: tool_call_update  │  (tool_call_update)        │
-  │<────────────────────────│<─────────────────────────│
-  │                         │                           │
-  │  SSE: run_complete      │ prompt response            │
-  │<────────────────────────│<─────────────────────────│
+Client                   Cloud Runtime                   Agent Process
+  │                         │                               │
+  │ POST /sessions/:id/     │                               │
+  │      prompt             │                               │
+  │────────────────────────>│ status=ready → execute        │
+  │                         │ session/prompt                │
+  │  202 {runId, status:    │──────────────────────────────>│
+  │       "running"}        │                               │
+  │<────────────────────────│                               │
+  │                         │ session/update                 │
+  │                         │  (agent_message_chunk)         │
+  │  SSE: agent_message_    │<──────────────────────────────│
+  │       chunk             │                               │
+  │<────────────────────────│ session/update                 │
+  │                         │  (tool_call)                   │
+  │  SSE: tool_call         │<──────────────────────────────│
+  │<────────────────────────│                               │
+  │                         │ session/update                 │
+  │  SSE: tool_call_update  │  (tool_call_update)            │
+  │<────────────────────────│<──────────────────────────────│
+  │                         │                               │
+  │  SSE: run_complete      │ prompt response                │
+  │<────────────────────────│<──────────────────────────────│
 ```
 
-### 2. 权限请求（approve-reads 模式下写操作）
+### 2. Permission Request (delegate mode / approve-reads with write operation)
 
 ```
-客户端                   云端运行时                   Agent 进程
-  │                         │                           │
-  │                         │ requestPermission          │
-  │                         │  (kind: edit)              │
-  │                         │<─────────────────────────│
-  │                         │                           │
-  │                         │ 权限控制器检查:             │
-  │                         │  mode=approve-reads        │
-  │                         │  kind=edit → 需要委托      │
-  │                         │                           │
-  │  SSE: permission_       │                           │
-  │       request           │                           │
-  │<────────────────────────│                           │
-  │                         │                           │
-  │ POST /permissions/      │                           │
-  │      :reqId             │                           │
-  │  {optionId: "opt_3a7x"} │  ← opaque token，原样     │
-  │────────────────────────>│    回传 agent 下发的 ID    │
-  │                         │                           │
-  │                         │ respond(optionId)          │
-  │                         │─────────────────────────>│
-  │                         │                           │
-  │                         │ (agent 继续执行工具)       │
+Client                   Cloud Runtime                   Agent Process
+  │                         │                               │
+  │                         │ requestPermission              │
+  │                         │  (kind: edit)                  │
+  │                         │<──────────────────────────────│
+  │                         │                               │
+  │                         │ PermissionController:          │
+  │                         │  mode=approve-reads            │
+  │                         │  kind=edit → delegate          │
+  │                         │                               │
+  │  SSE: permission_       │                               │
+  │       request           │                               │
+  │<────────────────────────│                               │
+  │                         │                               │
+  │ POST /sessions/:id/     │                               │
+  │  permissions/:reqId/    │                               │
+  │  respond                │                               │
+  │  {optionId: "opt_3a7x"} │  ← opaque token, returned    │
+  │────────────────────────>│    as-is to agent              │
+  │                         │                               │
+  │                         │ respond(optionId)              │
+  │                         │──────────────────────────────>│
+  │                         │                               │
+  │                         │ (agent continues tool exec)    │
 ```
 
-**重要：** `optionId` 是 agent 下发的 opaque token，客户端必须原样回传，不做本地语义推断。
-每个 agent 的 option ID 格式和含义可能不同 —— 语义信息在 `option.name` 和 `option.kind` 中，
-但最终响应只需要传 `optionId` 字符串。
+**Important:** `optionId` is an opaque token from the agent. The client must return it as-is.
+Each agent may use different option ID formats -- semantic info is in `option.name` and `option.kind`,
+but the response only needs the `optionId` string.
 
-### 3. 崩溃恢复
+**Timeout:** If no client response within `permissionTimeoutMs` (default 30s), the request auto-resolves
+with a `reject_once` or `reject_always` option, and a `permission_timeout` event is emitted.
 
-```
-云端运行时                              Agent 进程
-  │                                       │
-  │  检测到进程死亡 (exit/signal)           │ ✗
-  │                                       │
-  │  session.status = 'recovering'        │
-  │  重新 spawn agent 进程                 │
-  │───────────────────────────────────────>│ (新进程)
-  │                                       │
-  │  session/load(acpSessionId,           │
-  │              cwd, mcpServers)          │
-  │───────────────────────────────────────>│
-  │                                       │
-  │  ┌─ 成功: status = 'ready'            │
-  │  │  (agent 回放历史)                   │
-  │  │                                    │
-  │  └─ 失败 + recoveryPolicy=fallback:   │
-  │     session/new(cwd, mcpServers)       │
-  │────────────────────────────────────── >│
-  │     更新 acpSessionId                  │
-  │     status = 'ready'（丢失历史）        │
-```
-
-### 4. Agent 发现与启动
+### 3. Agent Process Crash
 
 ```
-GET /agents
+Cloud Runtime                              Agent Process
+  │                                           │
+  │  Detects process exit (exit/signal)       │ ✗
+  │                                           │
+  │  Cancel pending permissions               │
+  │  Cancel active run (if any)               │
+  │  session.status = 'terminated'            │
+  │  Emit session_status_changed              │
+  │  Close EventHub                           │
+```
+
+There is no crash recovery or respawn. When an agent process dies unexpectedly, the session transitions directly to `terminated`.
+
+### 4. Agent Discovery & Launch
+
+```
+CloudRuntime.createSession({agent: "claude-code"})
   │
   ▼
-注册表拉取 (cdn.agentclientprotocol.com/registry/v1/latest/registry.json)
+AgentPool.spawn(agentId)
   │
   ▼
-分发解析器 (DistributionResolver)
-  ├── npx:    command='npx', args=['-y', package, ...args]
-  │           （npm registry 提供内置完整性校验）
-  ├── uvx:    command='uvx', args=[package, ...args]
-  │           （命令模板可配置，不硬编码子命令）
-  └── binary: HTTPS 下载 → 可选 checksum 校验 → 缓存路径
+Lookup AgentDefinition from config
+  { command: "npx", args: ["-y", "@anthropic-ai/claude-code", "--agent"] }
   │
   ▼
-Agent 安装器 (AgentInstaller)
-  ├── 按 OS/arch 匹配二进制包
-  ├── 下载到 ~/.acp-cloud-runtime/agents/<id>/<version>/
-  └── 校验策略：
-      ├── 优先：registry 提供 checksum 时做 SHA256 校验
-      ├── 回退：registry 无 checksum（当前现状）→ 信任 HTTPS transport
-      └── 可选：配置 trusted mirror 或 sidecar checksums 文件
+child_process.spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] })
   │
   ▼
-child_process.spawn(command, args)
+ndJsonStream(stdin, stdout)
   │
   ▼
-ClientSideConnection + ndJsonStream
+ClientSideConnection
   │
   ▼
-initialize → session/new → 就绪
+initialize({ protocolVersion, clientInfo, clientCapabilities })
+  │
+  ▼
+AgentHandle { pid, connection, agentInfo, agentCapabilities, handlers }
+  │
+  ▼
+connection.newSession({ cwd, mcpServers: [] })
+  │
+  ▼
+Session ready (status: 'ready')
 ```
 
-## 会话状态机
+Agents are defined in the `RuntimeConfig.agents` map — a `Record<string, AgentDefinition>` where each entry specifies `command`, `args`, optional `env`, and optional `capabilities`. There is no registry fetching or agent installation; agents must be pre-configured.
+
+## Session State Machine
 
 ```
-                      spawn agent
-    [creating] ──────────────────────► [initializing]
-                                            │
-                                     initialize + session/new
-                                            │
-                                            ▼
-                   prompt              [ready] ◄───────────── [recovering]
-                     │                    ▲  ▲                      ▲
-                     ▼                    │  │ spawn + session/load  │
-                [running]  ───────────────┘  │                      │
-                     │         run complete   │                     │
-                     │                   [waking]                   │
-                     │                       ▲                      │
-                     │                       │ 收到新 prompt         │
-                     │                       │                      │
-                     │                  [sleeping]                  │
-                     │                       ▲                      │
-                     │                       │ TTL 到期              │
-                     │                       │ (进程回收,记录保留)    │
-                     │                       │                      │
-                     │              [ready] ─┘                      │
-                     │                                              │
-                     │ 进程死亡（非预期）              respawn +     │
-                     ▼                           session/load       │
-                [crashed] ─────────────────── 或 fallback-new ─────┘
-                     │
-                     │ 恢复失败（不可恢复错误 或 strict-load 模式）
-                     ▼
-                [terminated]
+                spawn + initialize + session/new
+    ────────────────────────────────────────────► [ready]
+                                                    │  ▲
+                                             prompt │  │ run complete
+                                                    ▼  │
+                                                 [busy]
+                                                    │
+                            ┌───────────────────────┤
+                            │                       │
+                     user close /              process crash
+                     DELETE session
+                            │                       │
+                            ▼                       ▼
+                                 [terminated]
 
-  注：用户主动关闭 session 时，从 ready/running 均可直达 terminated。
-  关闭流程：cancel pending → ACP session/close → SIGTERM → terminated。
+  Notes:
+  - User close from ready or busy → terminated
+  - Process crash from ready or busy → terminated (no recovery)
+  - Close attempts ACP session/close if agent supports it, then SIGTERM
 ```
 
-**状态说明：**
+**State descriptions:**
 
-| 状态 | 进程存活 | 记录保留 | 说明 |
-|------|---------|---------|------|
-| creating | 启动中 | 是 | spawn 进程 |
-| initializing | 是 | 是 | ACP initialize + session/new |
-| ready | 是 | 是 | 空闲，可接受 prompt |
-| running | 是 | 是 | 正在执行 prompt turn |
-| sleeping | **否** | 是 | TTL 到期后进程已回收，仅保留记录 |
-| waking | 启动中 | 是 | 收到新 prompt，重新 spawn + session/load |
-| crashed | 否 | 是 | 非预期死亡，等待恢复 |
-| recovering | 启动中 | 是 | respawn + session/load 或 fallback-new |
-| terminated | 否 | 归档 | 不可恢复，或用户主动关闭（经 ACP `session/close`） |
+| Status | Process Alive | Description |
+|--------|--------------|-------------|
+| `ready` | Yes | Idle, can accept a prompt |
+| `busy` | Yes | Executing a prompt (one active run) |
+| `terminated` | No | Session ended (user closed, crash, or init failure) |
 
-**TTL 与休眠策略：**
-- `ready` 状态空闲超过 `sessionTTL`（默认 300s，对齐 acpx）→ 进入 `sleeping`
-- `sleeping` 时进程已被 kill，SessionRecord 保留（含 acpSessionId）
-- 新 prompt 到达 sleeping session → `waking` → spawn + session/load → `ready` → 执行
-- `waking` 与 `recovering` 共享恢复路径，区别仅在触发原因（预期 vs 非预期）
-- sleeping session 超过 `sleepTTL`（可配置，默认 24h）→ `terminated`
+**Internal vs Public status:**
 
-## 三层会话 ID 模型
+The `SessionRecord` (durable, persisted to store) has `RecordStatus`: `'ready' | 'terminated'`.
+
+The public `SessionStatus` adds `'busy'`: derived at query time from `RecordStatus` + whether `execution.activeRunId` is set.
+
+```typescript
+function derivePublicStatus(record, execution): SessionStatus {
+  if (record.status === 'terminated') return 'terminated';
+  if (execution?.activeRunId) return 'busy';
+  return 'ready';
+}
+```
+
+## Session ID Model
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  id (运行时记录 ID)                                      │
-│  ├── 我们生成的 UUID                                     │
-│  ├── 在 SessionStore 中持久化                            │
-│  └── 跨 crash recovery 稳定不变                          │
+│  id (Runtime session ID)                                 │
+│  ├── UUID generated by CloudRuntime                      │
+│  ├── Persisted in SessionStore                           │
+│  └── Used in all HTTP API paths                          │
 │                                                          │
-│  acpSessionId (ACP 协议会话 ID)                          │
-│  ├── 从 session/new 响应获取                             │
-│  ├── 用于 session/load、session/prompt 等协议调用         │
-│  └── fallback-new 恢复后会变更                           │
-│                                                          │
-│  agentSessionId (Agent 原生会话 ID)                      │
-│  ├── Agent 内部标识（如 Claude SDK session、Codex thread）│
-│  ├── 可能与 acpSessionId 不同                            │
-│  └── 用于 agent 自身的会话持久化                          │
+│  acpSessionId (ACP protocol session ID)                  │
+│  ├── Obtained from session/new response                  │
+│  ├── Used for session/prompt, session/cancel, etc.       │
+│  └── Internal — not exposed to HTTP clients              │
 └─────────────────────────────────────────────────────────┘
 ```
 
-## 分发形态
+## HTTP API Routes
 
-核心价值：**部署我们的 server，用户通过标准 HTTP/SSE 访问后端 agent。**
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Health check (no auth) |
+| `GET` | `/config` | Returns workspace path |
+| `GET` | `/agents` | List configured agent IDs |
+| `POST` | `/sessions` | Create session `{agent, cwd?, permissionMode?}` → 201 |
+| `GET` | `/sessions` | List all sessions |
+| `GET` | `/sessions/:id` | Get session info |
+| `GET` | `/sessions/:id/events` | SSE event stream |
+| `POST` | `/sessions/:id/prompt` | Send prompt `{text}` → 202 `RunInfo` |
+| `POST` | `/sessions/:id/cancel` | Cancel active run |
+| `POST` | `/sessions/:id/permissions/:reqId/respond` | Respond to permission `{optionId}` |
+| `DELETE` | `/sessions/:id` | Close and terminate session |
+
+**Auth:** Optional API key via `Bearer` token in `Authorization` header. Public paths (`/health`, `/`) and static assets skip auth.
+
+**Error classification:**
+- `404` — session/agent not found
+- `409` — cannot prompt (busy), invalid permission response
+- `400` — malformed JSON or validation failure
+- `500` — unexpected errors
+
+## Event System
+
+### Event Types
+
+Events are delivered via SSE on `GET /sessions/:id/events`.
+
+**ACP events** (mapped 1:1 from ACP `session/update` notifications):
+- `user_message_chunk` — echoed user message content
+- `agent_message_chunk` — agent response content
+- `agent_thought_chunk` — agent thinking/reasoning content
+- `tool_call` — tool invocation started
+- `tool_call_update` — tool invocation progress/completion
+- `plan` — agent plan entries
+- `available_commands_update` — available slash commands changed
+- `current_mode_update` — agent mode changed
+- `config_option_update` — configuration options changed
+- `session_info_update` — session title/timestamp changed
+- `usage_update` — token usage and cost update
+
+**Lifecycle events** (emitted by SessionController):
+- `run_started` — run began
+- `run_completed` — run finished (includes `stopReason`)
+- `run_error` — run failed with error
+
+**Control events:**
+- `session_status_changed` — status transition (`from`, `to`, `reason`)
+- `permission_request` — permission delegation to client
+- `permission_timeout` — permission auto-rejected after timeout
+- `store_error` — session store persistence failure (non-fatal)
+
+### EventHub & Run Buffering
+
+Each session has an `EventHub` that manages event distribution:
+- Late subscribers receive a replay of buffered events from the current run (starting from `run_started`)
+- Buffer is cleared when the run completes
+- `status_changed` events are emitted *before* the buffer starts, so they are not replayed
+
+## Session Store
+
+Pluggable persistence via the `SessionStore` interface:
+
+```typescript
+interface SessionStore {
+  create(record: SessionRecord): Promise<void>;
+  get(id: string): Promise<SessionRecord | null>;
+  update(record: SessionRecord): Promise<void>;
+  delete(id: string): Promise<void>;
+  list(filter?: SessionFilter): Promise<SessionRecord[]>;
+}
+```
+
+**Implementations:**
+- `MemorySessionStore` — in-memory `Map`, copy-on-read/write semantics
+- `FileSessionStore` — JSON files in a directory, atomic writes via rename
+
+**SessionFilter** supports filtering by `agentId` and/or `status`.
+
+## Deployment
+
+Core value: **deploy our server, users access agents via standard HTTP/SSE.**
 
 ```
-部署方式                    命令                              适用场景
+Deployment                Command/Usage                     Use Case
 ──────────────────────────────────────────────────────────────────────
-npx acp-cloud start         一行命令                          本地开发、快速验证
-docker compose up            容器化                            生产部署
-createServer(runtime)        编程方式                          嵌入已有 Node 服务
-new CloudRuntime(config)     纯 SDK                           自定义服务框架
-CloudClient + React hooks    前端消费                          Web 应用集成
+docker compose up         Container deployment              Production
+createServer(runtime)     Programmatic                      Embed in existing Node service
+new CloudRuntime(config)  SDK only                          Custom server framework
 ```
 
 ```
-用户/前端  ──HTTP/SSE──►  acp-cloud server  ──stdio/ACP──►  Agent 进程
-                          (我们的交付物)                     (Claude/Codex/Gemini...)
+Client  ──HTTP/SSE──►  acp-cloud server  ──stdio/ACP──►  Agent Process
+                       (our deliverable)                  (Claude/Codex/Gemini...)
 ```
 
-用户不需要了解 ACP 协议，不需要管理 agent 进程。只需调用标准 HTTP API。
+Users don't need to understand the ACP protocol or manage agent processes. They call standard HTTP APIs.
 
-**边界：** 当前版本仅单实例，不做跨实例 session 迁移或分布式锁。
+**Boundary:** Current version is single-instance only. No cross-instance session migration or distributed locks.
 
-## 设计原则
+## Design Principles
 
-| # | 原则 | 说明 |
-|---|------|------|
-| 1 | **ACP 原生** | 直接使用协议，不发明新抽象 |
-| 2 | **不造轮子** | 依赖 @agentclientprotocol/sdk，读注册表，原样启动 agent |
-| 3 | **库优先** | 可导入的 SDK（第二层），HTTP 服务可选（第三层） |
-| 4 | **Agent 无关** | 任何 ACP-speaking agent 零代码接入 |
-| 5 | **细粒度推流** | 每个 ACP session/update 事件都透传到客户端 |
-| 6 | **社区对齐** | 跟踪 ACP 规范演进，为 Proxy Chains 兼容预留设计 |
-| 7 | **与 acpx 行为一致** | 权限命名、恢复策略、非交互策略均对齐 acpx |
+| # | Principle | Description |
+|---|-----------|-------------|
+| 1 | **ACP Native** | Use the protocol directly, no invented abstractions |
+| 2 | **Don't Reinvent Wheels** | Depend on @agentclientprotocol/sdk, launch agents as-is |
+| 3 | **Library First** | Importable SDK (Layer 1), HTTP server optional (Layer 2) |
+| 4 | **Agent Agnostic** | Any ACP-speaking agent works with zero code changes |
+| 5 | **Fine-Grained Streaming** | Every ACP session/update event is forwarded to the client |
+| 6 | **Community Aligned** | Track ACP spec evolution, design for Proxy Chains compatibility |

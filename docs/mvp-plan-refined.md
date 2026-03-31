@@ -95,7 +95,7 @@ Protocol note:
 | `initialize` | ✅ Supported | Protocol version + capability negotiation |
 | `session/new` | ✅ Supported | Creates a session with `cwd` |
 | `session/prompt` | ✅ Supported | Main execution path |
-| `session/cancel` | ✅ Phase 2 | Graceful run cancellation |
+| `session/cancel` | ✅ Supported | Graceful run cancellation |
 | `session/load` | ❌ Post-MVP | Needed for crash recovery, not MVP |
 | `session/list` | ❌ Not needed | Runtime owns registry |
 | `session/set_mode` | ❌ Post-MVP | Useful, but not required for service MVP |
@@ -176,16 +176,21 @@ This is enough to support "use agent as a service" without turning the runtime i
 
 ## HTTP/SSE Service Shape
 
-### Current Example Server
+### Current Server
 
-Today the example server demonstrates the basic transport shape:
+The server exposes the following routes:
 
 ```text
+GET    /health
+GET    /config
 GET    /agents
 POST   /sessions
 GET    /sessions
+GET    /sessions/:id
 GET    /sessions/:id/events
 POST   /sessions/:id/prompt
+POST   /sessions/:id/cancel
+POST   /sessions/:id/permissions/:requestId/respond
 DELETE /sessions/:id
 ```
 
@@ -249,8 +254,8 @@ Required before service completion:
 - `FileSessionStore`
 - interactive permission delegation
 - correct `approve-reads`
-- `cancelRun`
-- remove session-scoped MCP management from runtime API
+- ~~`cancelRun`~~ done
+- ~~remove session-scoped MCP management from runtime API~~ done
 - ensure unsupported client capabilities stay disabled
 
 ### Phase 3 — Production HTTP/SSE Service

@@ -1,5 +1,5 @@
 graph TD
-    API["CloudRuntime API<br/>createSession / promptSession<br/>getSession / closeSession<br/>subscribeSession / listAgents"]
+    API["CloudRuntime API<br/>createSession / promptSession<br/>getSession / closeSession<br/>cancelRun / respondToPermission<br/>listSessions / subscribeSession / listAgents"]
     ADM["Admission Control<br/>maxActiveSessions<br/>maxAgentProcesses"]
     REG["Session Registry<br/>Map: id → SessionController"]
     POOL["AgentPool<br/>spawn / kill<br/>onProcessExit callback"]
