@@ -3,6 +3,7 @@
 // Depends on: lit (CDN), marked (global), hljs (global), ./acp-client.js
 
 import { LitElement, html, css } from 'https://cdn.jsdelivr.net/npm/lit@3/+esm';
+import { AcpClient } from './acp-client.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -622,3 +623,343 @@ class AcpChat extends LitElement {
   }
 }
 customElements.define('acp-chat', AcpChat);
+
+// ── <acp-app> ────────────────────────────────────────────────────────
+// Root component. Owns all state. Wires AcpClient + SSE to child components.
+
+class AcpApp extends LitElement {
+  static properties = {
+    status: { type: String },
+    messages: { type: Array },
+    sessions: { type: Array },
+    agents: { type: Array },
+    _sessionId: { state: true },
+    _selectedAgent: { state: true },
+    _apiKey: { state: true },
+  };
+
+  constructor() {
+    super();
+    this.status = 'connecting';
+    this.messages = [];
+    this.sessions = [];
+    this.agents = [];
+    this._sessionId = null;
+    this._selectedAgent = '';
+    this._apiKey = sessionStorage.getItem('acp_token') || '';
+    this._client = null;
+    this._sse = null;
+    this._currentAgentMsg = null;
+    this._currentThinking = null;
+    this._rafPending = false;
+  }
+
+  static styles = css`
+    :host { display: flex; flex-direction: column; height: 100%; }
+    .body { display: flex; flex: 1; overflow: hidden; }
+    .main { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+  `;
+
+  connectedCallback() {
+    super.connectedCallback();
+    this._client = new AcpClient(location.origin, this._apiKey);
+    this._init();
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this._sse?.close();
+  }
+
+  render() {
+    return html`
+      <acp-header
+        .agents=${this.agents}
+        selected-agent=${this._selectedAgent}
+        .status=${this.status}
+        api-key=${this._apiKey}
+        @agent-change=${e => this._selectedAgent = e.detail}
+        @api-key-change=${this._onApiKeyChange}
+        @new-session=${this._newSession}
+        @cancel-run=${this._cancelRun}
+        @close-session=${this._closeSession}
+      ></acp-header>
+      <div class="body">
+        <acp-sidebar
+          .sessions=${this.sessions}
+          active-id=${this._sessionId || ''}
+          @session-select=${e => this._switchSession(e.detail)}
+        ></acp-sidebar>
+        <div class="main">
+          <acp-chat .messages=${this.messages} .status=${this.status}></acp-chat>
+          <acp-input
+            ?disabled=${this.status !== 'ready'}
+            @send-prompt=${e => this._sendPrompt(e.detail)}
+          ></acp-input>
+        </div>
+      </div>
+    `;
+  }
+
+  // ── Lifecycle ──
+
+  async _init() {
+    try {
+      const [configRes, agentsRes] = await Promise.all([
+        this._client.getConfig().catch(() => ({ workspace: '' })),
+        this._client.listAgents(),
+      ]);
+      this._workspace = configRes.workspace || '';
+      this.agents = (agentsRes.agents || []).filter(a => a !== 'mock');
+      if (this.agents.length > 0) {
+        this._selectedAgent = this.agents.includes('pi') ? 'pi' : this.agents[0];
+        await this._newSession();
+      } else {
+        this.status = 'terminated';
+        this._addSystem('No agents available');
+      }
+      await this._refreshSessions();
+    } catch (e) {
+      this.status = 'terminated';
+      this._addSystem('Connection error: ' + e.message);
+    }
+  }
+
+  _onApiKeyChange(e) {
+    this._apiKey = e.detail;
+    if (this._apiKey) sessionStorage.setItem('acp_token', this._apiKey);
+    else sessionStorage.removeItem('acp_token');
+    this._client.apiKey = this._apiKey;
+    this._sse?.close();
+    this.messages = [];
+    this._init();
+  }
+
+  // ── Session Management ──
+
+  async _newSession() {
+    this._sse?.close();
+    if (this._sessionId) {
+      await this._client.closeSession(this._sessionId).catch(() => {});
+    }
+    this._sessionId = null;
+    this.messages = [];
+    this.status = 'connecting';
+
+    try {
+      const info = await this._client.createSession(
+        this._selectedAgent,
+        this._workspace || '.',
+      );
+      this._sessionId = info.id;
+      this._addSystem(`${this._selectedAgent} session ready`);
+      this.status = 'ready';
+      this._connectSSE(info.id);
+      await this._refreshSessions();
+    } catch (e) {
+      this._addSystem('Error: ' + e.message);
+      this.status = 'terminated';
+    }
+  }
+
+  async _closeSession() {
+    if (!this._sessionId) return;
+    this._sse?.close();
+    await this._client.closeSession(this._sessionId).catch(() => {});
+    this._addSystem('Session closed.');
+    this.status = 'terminated';
+    this._sessionId = null;
+    await this._refreshSessions();
+  }
+
+  async _switchSession(id) {
+    if (id === this._sessionId) return;
+    this._sse?.close();
+    this._sessionId = id;
+    this.messages = [];
+    this._currentAgentMsg = null;
+    this._currentThinking = null;
+
+    try {
+      const info = await this._client.getSession(id);
+      this.status = info.status || 'ready';
+      this._addSystem(`Switched to session ${id.slice(0, 8)}...`);
+      this._connectSSE(id);
+    } catch (e) {
+      this._addSystem('Error: ' + e.message);
+      this.status = 'terminated';
+    }
+  }
+
+  async _cancelRun() {
+    if (!this._sessionId) return;
+    try {
+      await this._client.cancelRun(this._sessionId);
+    } catch (e) {
+      this._addSystem('Cancel failed: ' + e.message);
+    }
+  }
+
+  async _refreshSessions() {
+    try {
+      const list = await this._client.listSessions();
+      this.sessions = Array.isArray(list) ? list : [];
+    } catch { /* ignore */ }
+  }
+
+  // ── Prompt ──
+
+  async _sendPrompt(text) {
+    if (!text || !this._sessionId) return;
+    this.messages = [...this.messages, { type: 'user', text }];
+    try {
+      await this._client.prompt(this._sessionId, text);
+    } catch (e) {
+      this._addSystem('Error: ' + e.message);
+    }
+  }
+
+  // ── SSE ──
+
+  _connectSSE(sessionId) {
+    this._sse?.close();
+    this._sse = this._client.subscribe(sessionId);
+
+    this._sse.addEventListener('session_status_changed', e => {
+      this.status = e.detail.to;
+      if (e.detail.to === 'terminated') this._sse?.close();
+    });
+
+    this._sse.addEventListener('run_started', () => {
+      this._currentAgentMsg = null;
+      this._currentThinking = null;
+      this._scheduleUpdate();
+    });
+
+    this._sse.addEventListener('agent_message_chunk', e => {
+      const text = e.detail.content?.text || '';
+      if (!text) return;
+      if (!this._currentAgentMsg) {
+        this._currentAgentMsg = { type: 'agent', text: '', streaming: true };
+        this.messages.push(this._currentAgentMsg);
+      }
+      this._currentAgentMsg.text += text;
+      this._scheduleUpdate();
+    });
+
+    this._sse.addEventListener('agent_thought_chunk', e => {
+      const text = e.detail.content?.text || '';
+      if (!text) return;
+      if (!this._currentThinking) {
+        this._currentThinking = { type: 'thinking', text: '', streaming: true };
+        this.messages.push(this._currentThinking);
+      }
+      this._currentThinking.text += text;
+      this._scheduleUpdate();
+    });
+
+    this._sse.addEventListener('tool_call', e => {
+      this._finalizeStreaming();
+      this.messages.push({
+        type: 'tool',
+        id: e.detail.toolCallId,
+        title: e.detail.title || 'tool',
+        kind: e.detail.kind || '',
+        status: e.detail.status || 'in_progress',
+      });
+      this._scheduleUpdate();
+    });
+
+    this._sse.addEventListener('tool_call_update', e => {
+      const tool = this.messages.find(
+        m => m.type === 'tool' && m.id === e.detail.toolCallId
+      );
+      if (tool) tool.status = e.detail.status;
+      this._scheduleUpdate();
+    });
+
+    this._sse.addEventListener('run_completed', e => {
+      this._finalizeStreaming();
+      if (e.detail.stopReason && e.detail.stopReason !== 'end_turn') {
+        this._addSystem('Run ended: ' + e.detail.stopReason);
+      }
+      this.status = 'ready';
+      this._scheduleUpdate();
+      this._refreshSessions();
+    });
+
+    this._sse.addEventListener('run_error', e => {
+      this._finalizeStreaming();
+      this._addSystem('Error: ' + (e.detail.error || 'unknown'));
+      this.status = 'ready';
+      this._scheduleUpdate();
+    });
+
+    this._sse.addEventListener('permission_request', e => {
+      this.messages.push({
+        type: 'permission',
+        requestId: e.detail.requestId,
+        toolCall: e.detail.toolCall || {},
+        options: e.detail.options || [],
+        resolved: false,
+      });
+      this._scheduleUpdate();
+    });
+
+    this._sse.addEventListener('permission_timeout', e => {
+      const perm = this.messages.find(
+        m => m.type === 'permission' && m.requestId === e.detail.requestId
+      );
+      if (perm) { perm.resolved = true; }
+      this._addSystem('Permission timed out');
+      this._scheduleUpdate();
+    });
+
+    // Handle permission responses from child component
+    this.addEventListener('permission-respond', async (e) => {
+      const { requestId, optionId } = e.detail;
+      try {
+        await this._client.respondToPermission(this._sessionId, requestId, optionId);
+        const perm = this.messages.find(
+          m => m.type === 'permission' && m.requestId === requestId
+        );
+        if (perm) perm.resolved = true;
+        this._scheduleUpdate();
+      } catch (err) {
+        this._addSystem('Permission error: ' + err.message);
+      }
+    });
+
+    this._sse.addEventListener('error', e => {
+      console.error('SSE error:', e.detail);
+    });
+  }
+
+  // ── Helpers ──
+
+  _finalizeStreaming() {
+    if (this._currentAgentMsg) {
+      this._currentAgentMsg.streaming = false;
+      this._currentAgentMsg = null;
+    }
+    if (this._currentThinking) {
+      this._currentThinking.streaming = false;
+      this._currentThinking = null;
+    }
+  }
+
+  _addSystem(text) {
+    this.messages = [...this.messages, { type: 'system', text }];
+  }
+
+  /** Batch streaming updates into one render per animation frame. */
+  _scheduleUpdate() {
+    if (this._rafPending) return;
+    this._rafPending = true;
+    requestAnimationFrame(() => {
+      this._rafPending = false;
+      this.messages = [...this.messages];
+    });
+  }
+}
+customElements.define('acp-app', AcpApp);
