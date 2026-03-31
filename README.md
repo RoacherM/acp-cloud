@@ -88,7 +88,7 @@ serve({ fetch: app.fetch, port: 3000 });
 ### Standalone (run directly)
 
 ```bash
-git clone <repo-url> && cd ai-cloud-code
+git clone https://github.com/RoacherM/acp-cloud.git && cd acp-cloud
 npm install
 
 # Set your API key
