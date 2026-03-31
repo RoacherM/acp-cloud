@@ -663,6 +663,20 @@ class AcpApp extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     this._client = new AcpClient(location.origin, this._apiKey);
+    // Listen for permission responses from child components (once, not per SSE connect)
+    this.addEventListener('permission-respond', async (e) => {
+      const { requestId, optionId } = e.detail;
+      try {
+        await this._client.respondToPermission(this._sessionId, requestId, optionId);
+        const perm = this.messages.find(
+          m => m.type === 'permission' && m.requestId === requestId
+        );
+        if (perm) perm.resolved = true;
+        this._scheduleUpdate();
+      } catch (err) {
+        this._addSystem('Permission error: ' + err.message);
+      }
+    });
     this._init();
   }
 
@@ -913,21 +927,6 @@ class AcpApp extends LitElement {
       if (perm) { perm.resolved = true; }
       this._addSystem('Permission timed out');
       this._scheduleUpdate();
-    });
-
-    // Handle permission responses from child component
-    this.addEventListener('permission-respond', async (e) => {
-      const { requestId, optionId } = e.detail;
-      try {
-        await this._client.respondToPermission(this._sessionId, requestId, optionId);
-        const perm = this.messages.find(
-          m => m.type === 'permission' && m.requestId === requestId
-        );
-        if (perm) perm.resolved = true;
-        this._scheduleUpdate();
-      } catch (err) {
-        this._addSystem('Permission error: ' + err.message);
-      }
     });
 
     this._sse.addEventListener('error', e => {
