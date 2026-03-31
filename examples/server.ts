@@ -15,8 +15,6 @@ const runtime = new CloudRuntime({
       args: [],
       env: {
         OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
-        MINIMAX_API_KEY: process.env.MINIMAX_API_KEY,
-        MINIMAX_CN_API_KEY: process.env.MINIMAX_CN_API_KEY,
       },
     },
     claude: {

@@ -3,6 +3,7 @@
 // Depends on: lit (CDN), marked (global), hljs (global), ./acp-client.js
 
 import { LitElement, html, css } from 'https://cdn.jsdelivr.net/npm/lit@3/+esm';
+import remend from 'https://cdn.jsdelivr.net/npm/remend@1/dist/index.js';
 import { AcpClient } from './acp-client.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -74,10 +75,9 @@ class AcpMessage extends LitElement {
       color: #fff; border-top-right-radius: 4px;
     }
 
-    /* Streaming cursor */
-    .streaming { white-space: pre-wrap; }
-    .streaming::after {
-      content: ''; display: inline-block; width: 2px; height: 1em;
+    /* Streaming caret (injected into last element) */
+    .caret {
+      display: inline-block; width: 2px; height: 1em;
       background: #6366f1; margin-left: 1px; vertical-align: text-bottom;
       animation: blink .8s step-end infinite;
     }
@@ -122,12 +122,18 @@ class AcpMessage extends LitElement {
   updated() {
     const bubble = this.renderRoot.querySelector('.bubble');
     if (!bubble) return;
-    if (this.role === 'agent' && !this.streaming && this.text) {
+    if (this.role === 'agent' && this.text) {
       bubble.classList.add('md');
-      bubble.innerHTML = renderMarkdown(this.text);
-      bubble.querySelectorAll('pre code').forEach(el => {
-        if (!el.dataset.highlighted) hljs.highlightElement(el);
-      });
+      const source = this.streaming ? remend(this.text) : this.text;
+      bubble.innerHTML = renderMarkdown(source);
+      if (this.streaming) {
+        const target = bubble.lastElementChild || bubble;
+        target.insertAdjacentHTML('beforeend', '<span class="caret"></span>');
+      } else {
+        bubble.querySelectorAll('pre code').forEach(el => {
+          if (!el.dataset.highlighted) hljs.highlightElement(el);
+        });
+      }
     } else {
       bubble.classList.remove('md');
       bubble.textContent = this.text || '';
