@@ -205,3 +205,181 @@ class AcpInput extends LitElement {
   }
 }
 customElements.define('acp-input', AcpInput);
+
+// ── <acp-thinking> ───────────────────────────────────────────────────
+// Collapsible thinking/reasoning block.
+// Collapsed by default. Shows "Thinking..." while streaming, "Thought" when done.
+
+class AcpThinking extends LitElement {
+  static properties = {
+    text: { type: String },
+    streaming: { type: Boolean },
+    _open: { state: true },
+  };
+
+  constructor() { super(); this._open = false; }
+
+  static styles = css`
+    :host { display: block; max-width: 80%; }
+    .toggle {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 12px; color: #b0b0b0; cursor: pointer; user-select: none; padding: 2px 0;
+    }
+    .toggle:hover { color: #888; }
+    .arrow {
+      display: inline-block; font-size: 10px; transition: transform .2s;
+    }
+    .arrow.open { transform: rotate(90deg); }
+    .label.streaming {
+      background: linear-gradient(90deg, #d1d5db, #e5e7eb, #d1d5db);
+      background-size: 200% 100%;
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      animation: shimmer 1.5s infinite;
+    }
+    @keyframes shimmer { 0%{background-position:200% 0}100%{background-position:-200% 0} }
+    .content {
+      padding: 8px 12px; border-radius: 8px; font-size: 12px;
+      color: #9ca3af; background: #f9fafb; border: 1px solid #f3f4f6;
+      font-style: italic; max-height: 200px; overflow-y: auto;
+      line-height: 1.5; margin-top: 4px; white-space: pre-wrap;
+    }
+  `;
+
+  render() {
+    return html`
+      <div class="toggle" @click=${() => this._open = !this._open}>
+        <span class="arrow ${this._open ? 'open' : ''}">&#x25B6;</span>
+        <span class="label ${this.streaming ? 'streaming' : ''}">
+          ${this.streaming ? 'Thinking...' : 'Thought'}
+        </span>
+      </div>
+      ${this._open ? html`<div class="content">${this.text}</div>` : ''}
+    `;
+  }
+}
+customElements.define('acp-thinking', AcpThinking);
+
+// ── <acp-tool-call> ──────────────────────────────────────────────────
+// Compact bar showing tool execution status.
+// Status: 'in_progress' (amber), 'completed' (green), 'failed' (red).
+
+class AcpToolCall extends LitElement {
+  static properties = {
+    title: { type: String },
+    kind: { type: String },
+    status: { type: String },
+  };
+
+  static styles = css`
+    :host { display: block; max-width: 80%; }
+    .bar {
+      padding: 6px 10px; border-radius: 8px; font-size: 12px;
+      color: #6b7280; background: #fff; border: 1px solid #e5e5e5;
+      border-left: 3px solid #6366f1;
+      display: flex; align-items: center; gap: 6px; transition: all .3s;
+    }
+    .bar.in_progress { border-left-color: #f59e0b; background: #fffbeb; }
+    .bar.completed { border-left-color: #10b981; }
+    .bar.failed { border-left-color: #ef4444; background: #fef2f2; }
+    .icon { opacity: .5; }
+    .name { font-weight: 500; color: #374151; }
+    .kind { color: #9ca3af; }
+    .badge {
+      font-size: 10px; margin-left: auto; padding: 1px 6px;
+      border-radius: 4px; background: #f3f4f6; color: #6b7280;
+    }
+    .in_progress .badge { background: #fef3c7; color: #92400e; }
+    .completed .badge { background: #d1fae5; color: #065f46; }
+    .failed .badge { background: #fee2e2; color: #991b1b; }
+  `;
+
+  render() {
+    const s = this.status || 'pending';
+    return html`
+      <div class="bar ${s}">
+        <span class="icon">&#x2699;</span>
+        <span class="name">${this.title}</span>
+        ${this.kind ? html`<span class="kind">${this.kind}</span>` : ''}
+        <span class="badge">${s}</span>
+      </div>
+    `;
+  }
+}
+customElements.define('acp-tool-call', AcpToolCall);
+
+// ── <acp-permission> ─────────────────────────────────────────────────
+// Interactive permission dialog. Shows tool info + approve/deny buttons.
+// Dispatches 'permission-respond' with { detail: { requestId, optionId } }.
+
+class AcpPermission extends LitElement {
+  static properties = {
+    requestId: { type: String, attribute: 'request-id' },
+    toolCall: { type: Object },
+    options: { type: Array },
+    resolved: { type: Boolean },
+    _chosen: { state: true },
+  };
+
+  constructor() { super(); this.options = []; this._chosen = null; }
+
+  static styles = css`
+    :host { display: block; max-width: 80%; }
+    .card {
+      padding: 12px 14px; border-radius: 10px; background: #fffbeb;
+      border: 1px solid #fde68a; font-size: 13px;
+    }
+    .title { font-weight: 600; color: #92400e; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+    .desc { color: #78716c; margin-bottom: 10px; font-size: 12px; }
+    .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    button {
+      padding: 5px 12px; border-radius: 6px; border: 1px solid #e5e7eb;
+      background: #fff; font-size: 12px; cursor: pointer; font-family: inherit;
+      transition: all .15s;
+    }
+    button:hover:not(:disabled) { background: #f3f4f6; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    button.allow { border-color: #86efac; color: #065f46; }
+    button.allow:hover:not(:disabled) { background: #dcfce7; }
+    button.reject { border-color: #fca5a5; color: #991b1b; }
+    button.reject:hover:not(:disabled) { background: #fee2e2; }
+    button.chosen { font-weight: 600; box-shadow: 0 0 0 2px #6366f1; }
+    .resolved { color: #9ca3af; font-size: 11px; margin-top: 6px; }
+  `;
+
+  render() {
+    const toolTitle = this.toolCall?.title || 'Unknown tool';
+    return html`
+      <div class="card">
+        <div class="title">&#x1F512; Permission required: ${toolTitle}</div>
+        ${this.toolCall?.description
+          ? html`<div class="desc">${this.toolCall.description}</div>`
+          : ''}
+        <div class="actions">
+          ${(this.options || []).map(opt => {
+            const isAllow = opt.kind?.startsWith('allow');
+            const cls = isAllow ? 'allow' : 'reject';
+            const chosen = this._chosen === opt.optionId;
+            return html`
+              <button
+                class="${cls} ${chosen ? 'chosen' : ''}"
+                ?disabled=${this.resolved}
+                @click=${() => this._respond(opt.optionId)}
+              >${opt.name || opt.optionId}</button>
+            `;
+          })}
+        </div>
+        ${this.resolved ? html`<div class="resolved">Responded</div>` : ''}
+      </div>
+    `;
+  }
+
+  _respond(optionId) {
+    this._chosen = optionId;
+    this.dispatchEvent(new CustomEvent('permission-respond', {
+      detail: { requestId: this.requestId, optionId },
+      bubbles: true,
+      composed: true,
+    }));
+  }
+}
+customElements.define('acp-permission', AcpPermission);
