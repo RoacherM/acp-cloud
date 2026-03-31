@@ -664,7 +664,7 @@ class AcpApp extends LitElement {
     super.connectedCallback();
     this._client = new AcpClient(location.origin, this._apiKey);
     // Listen for permission responses from child components (once, not per SSE connect)
-    this.addEventListener('permission-respond', async (e) => {
+    this._permissionHandler = async (e) => {
       const { requestId, optionId } = e.detail;
       try {
         await this._client.respondToPermission(this._sessionId, requestId, optionId);
@@ -676,13 +676,15 @@ class AcpApp extends LitElement {
       } catch (err) {
         this._addSystem('Permission error: ' + err.message);
       }
-    });
+    };
+    this.addEventListener('permission-respond', this._permissionHandler);
     this._init();
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     this._sse?.close();
+    this.removeEventListener('permission-respond', this._permissionHandler);
   }
 
   render() {
@@ -793,6 +795,7 @@ class AcpApp extends LitElement {
     this.messages = [];
     this._currentAgentMsg = null;
     this._currentThinking = null;
+    this.status = 'connecting';
 
     try {
       const info = await this._client.getSession(id);
