@@ -13,7 +13,11 @@ const runtime = new CloudRuntime({
     pi: {
       command: 'pi-acp',
       args: [],
-      env: { OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY },
+      env: {
+        OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+        MINIMAX_API_KEY: process.env.MINIMAX_API_KEY,
+        MINIMAX_CN_API_KEY: process.env.MINIMAX_CN_API_KEY,
+      },
     },
     claude: {
       command: 'claude-agent-acp',

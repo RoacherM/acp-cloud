@@ -146,20 +146,27 @@ class AcpInput extends LitElement {
   };
 
   static styles = css`
-    :host { display: block; padding: 12px 16px; background: #fff;
-      border-top: 1px solid #e5e7eb; box-shadow: 0 -1px 3px rgba(0,0,0,.04); }
-    .wrap { max-width: 760px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
-    textarea {
-      flex: 1; padding: 10px 14px; border-radius: 12px; border: 1.5px solid #e5e7eb;
-      background: #f9fafb; color: #1a1a1a; font-size: 14px; font-family: inherit;
-      resize: none; line-height: 1.5; min-height: 40px; max-height: 140px;
+    :host { display: block; padding: 12px 16px; background: transparent; flex-shrink: 0; }
+    .wrap {
+      max-width: 760px; margin: 0 auto; position: relative;
+      background: #fff; border-radius: 16px; border: 1.5px solid #e5e7eb;
+      box-shadow: 0 2px 8px rgba(0,0,0,.06);
       transition: border-color .15s;
     }
-    textarea:focus { outline: none; border-color: #6366f1; background: #fff; }
+    .wrap:focus-within { border-color: #6366f1; }
+    textarea {
+      width: 100%; padding: 14px 50px 14px 16px; border: none; background: transparent;
+      color: #1a1a1a; font-size: 14px; font-family: inherit;
+      resize: none; line-height: 1.5; min-height: 44px; max-height: 140px;
+      border-radius: 16px;
+    }
+    textarea:focus { outline: none; }
     textarea:disabled { opacity: .4; }
+    textarea::placeholder { color: #aaa; }
     button {
-      width: 40px; height: 40px; border-radius: 10px; border: none;
-      background: #6366f1; color: white; font-size: 16px; cursor: pointer;
+      position: absolute; right: 8px; bottom: 8px;
+      width: 32px; height: 32px; border-radius: 8px; border: none;
+      background: #6366f1; color: white; font-size: 14px; cursor: pointer;
       display: flex; align-items: center; justify-content: center;
       flex-shrink: 0; transition: background .15s;
     }
@@ -556,10 +563,11 @@ class AcpChat extends LitElement {
   constructor() { super(); this.messages = []; }
 
   static styles = css`
-    :host { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+    :host { display: flex; flex-direction: column; flex: 1; min-height: 0; }
     .scroll { flex: 1; overflow-y: auto; padding: 20px 16px; }
     .inner { max-width: 760px; width: 100%; margin: 0 auto;
-      display: flex; flex-direction: column; gap: 12px; }
+      display: flex; flex-direction: column; gap: 12px;
+      min-height: 100%; justify-content: flex-end; }
     .typing {
       display: inline-flex; gap: 4px; padding: 10px 14px;
       background: #fff; border-radius: 14px; border: 1px solid #e5e5e5;
@@ -618,7 +626,9 @@ class AcpChat extends LitElement {
   updated() {
     const scroll = this.renderRoot.querySelector('#scroll');
     if (scroll) {
-      requestAnimationFrame(() => { scroll.scrollTop = scroll.scrollHeight; });
+      // Only auto-scroll if user is near the bottom (within 80px)
+      const nearBottom = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 80;
+      if (nearBottom) requestAnimationFrame(() => { scroll.scrollTop = scroll.scrollHeight; });
     }
   }
 }
@@ -656,8 +666,8 @@ class AcpApp extends LitElement {
 
   static styles = css`
     :host { display: flex; flex-direction: column; height: 100%; }
-    .body { display: flex; flex: 1; overflow: hidden; }
-    .main { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+    .body { display: flex; flex: 1; min-height: 0; }
+    .main { display: flex; flex-direction: column; flex: 1; min-height: 0; }
   `;
 
   connectedCallback() {
