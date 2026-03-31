@@ -383,3 +383,242 @@ class AcpPermission extends LitElement {
   }
 }
 customElements.define('acp-permission', AcpPermission);
+
+// ── <acp-header> ─────────────────────────────────────────────────────
+// Top bar: status dot, title, API key input, agent select, action buttons.
+// Dispatches: agent-change, api-key-change, new-session, cancel-run, close-session.
+
+class AcpHeader extends LitElement {
+  static properties = {
+    agents: { type: Array },
+    selectedAgent: { type: String, attribute: 'selected-agent' },
+    status: { type: String },
+    apiKey: { type: String, attribute: 'api-key' },
+  };
+
+  constructor() { super(); this.agents = []; }
+
+  static styles = css`
+    :host { display: block; }
+    .bar {
+      padding: 10px 16px; background: #fff; border-bottom: 1px solid #e5e7eb;
+      display: flex; align-items: center; gap: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.04); z-index: 10;
+    }
+    .logo { display: flex; align-items: center; gap: 8px; }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%; background: #9ca3af; flex-shrink: 0;
+    }
+    .dot.ready { background: #10b981; }
+    .dot.busy { background: #f59e0b; animation: pulse 1.5s infinite; }
+    .dot.terminated { background: #ef4444; }
+    @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.4} }
+    h1 { font-size: 14px; font-weight: 600; color: #374151; white-space: nowrap; }
+    .status { font-size: 11px; color: #9ca3af; }
+    .controls { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+    select, button, input {
+      font-size: 12px; padding: 5px 10px; border-radius: 6px;
+      border: 1px solid #e5e7eb; background: #fff; color: #374151;
+      cursor: pointer; font-family: inherit; transition: all .15s;
+    }
+    select:hover, button:hover { background: #f3f4f6; border-color: #d1d5db; }
+    input { width: 130px; cursor: text; }
+    .danger { color: #ef4444; }
+    .danger:hover { background: #fef2f2; border-color: #fecaca; }
+    .cancel { color: #f59e0b; }
+    .cancel:hover { background: #fffbeb; border-color: #fde68a; }
+  `;
+
+  render() {
+    return html`
+      <div class="bar">
+        <div class="logo">
+          <div class="dot ${this.status || ''}"></div>
+          <h1>ACP Cloud</h1>
+        </div>
+        <span class="status">${this.status || 'connecting'}</span>
+        <div class="controls">
+          <input
+            type="password"
+            placeholder="API Key"
+            .value=${this.apiKey || ''}
+            @change=${this._onApiKey}
+          >
+          <select @change=${this._onAgent}>
+            ${(this.agents || []).map(a => html`
+              <option value=${a} ?selected=${a === this.selectedAgent}>${a}</option>
+            `)}
+          </select>
+          <button @click=${this._newSession}>+ New</button>
+          ${this.status === 'busy' ? html`
+            <button class="cancel" @click=${this._cancel}>Cancel</button>
+          ` : ''}
+          <button class="danger" @click=${this._close}>Close</button>
+        </div>
+      </div>
+    `;
+  }
+
+  _onApiKey(e) {
+    this.dispatchEvent(new CustomEvent('api-key-change', {
+      detail: e.target.value.trim(), bubbles: true, composed: true,
+    }));
+  }
+  _onAgent(e) {
+    this.dispatchEvent(new CustomEvent('agent-change', {
+      detail: e.target.value, bubbles: true, composed: true,
+    }));
+  }
+  _newSession() {
+    this.dispatchEvent(new CustomEvent('new-session', { bubbles: true, composed: true }));
+  }
+  _cancel() {
+    this.dispatchEvent(new CustomEvent('cancel-run', { bubbles: true, composed: true }));
+  }
+  _close() {
+    this.dispatchEvent(new CustomEvent('close-session', { bubbles: true, composed: true }));
+  }
+}
+customElements.define('acp-header', AcpHeader);
+
+// ── <acp-sidebar> ────────────────────────────────────────────────────
+// Left panel: list of sessions. Click to switch.
+// Dispatches 'session-select' with { detail: sessionId }.
+
+class AcpSidebar extends LitElement {
+  static properties = {
+    sessions: { type: Array },
+    activeId: { type: String, attribute: 'active-id' },
+  };
+
+  constructor() { super(); this.sessions = []; }
+
+  static styles = css`
+    :host { display: block; width: 200px; background: #fff; border-right: 1px solid #e5e7eb;
+      overflow-y: auto; flex-shrink: 0; }
+    .title {
+      padding: 12px 14px 8px; font-size: 11px; font-weight: 600;
+      color: #9ca3af; text-transform: uppercase; letter-spacing: .5px;
+    }
+    .item {
+      padding: 8px 14px; cursor: pointer; font-size: 13px;
+      display: flex; align-items: center; gap: 8px; transition: background .15s;
+    }
+    .item:hover { background: #f9fafb; }
+    .item.active { background: #eef2ff; color: #4f46e5; font-weight: 500; }
+    .agent { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .badge {
+      font-size: 9px; padding: 1px 5px; border-radius: 3px;
+      background: #f3f4f6; color: #9ca3af;
+    }
+    .badge.ready { background: #d1fae5; color: #065f46; }
+    .badge.busy { background: #fef3c7; color: #92400e; }
+    .badge.terminated { background: #fee2e2; color: #991b1b; }
+    .empty { padding: 14px; font-size: 12px; color: #ccc; text-align: center; }
+  `;
+
+  render() {
+    return html`
+      <div class="title">Sessions</div>
+      ${this.sessions.length === 0
+        ? html`<div class="empty">No sessions</div>`
+        : this.sessions.map(s => html`
+            <div
+              class="item ${s.id === this.activeId ? 'active' : ''}"
+              @click=${() => this._select(s.id)}
+            >
+              <span class="agent">${s.agentId || s.agent || '?'}</span>
+              <span class="badge ${s.status || ''}">${s.status || '?'}</span>
+            </div>
+          `)}
+    `;
+  }
+
+  _select(id) {
+    this.dispatchEvent(new CustomEvent('session-select', {
+      detail: id, bubbles: true, composed: true,
+    }));
+  }
+}
+customElements.define('acp-sidebar', AcpSidebar);
+
+// ── <acp-chat> ───────────────────────────────────────────────────────
+// Scrollable message list. Renders each message as the appropriate component.
+// Auto-scrolls to bottom on new messages.
+
+class AcpChat extends LitElement {
+  static properties = {
+    messages: { type: Array, hasChanged: () => true },
+    status: { type: String },
+  };
+
+  constructor() { super(); this.messages = []; }
+
+  static styles = css`
+    :host { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+    .scroll { flex: 1; overflow-y: auto; padding: 20px 16px; }
+    .inner { max-width: 760px; width: 100%; margin: 0 auto;
+      display: flex; flex-direction: column; gap: 12px; }
+    .typing {
+      display: inline-flex; gap: 4px; padding: 10px 14px;
+      background: #fff; border-radius: 14px; border: 1px solid #e5e5e5;
+      border-top-left-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,.04);
+    }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: #d1d5db; animation: typing 1.4s infinite; }
+    .dot:nth-child(2) { animation-delay: .2s; }
+    .dot:nth-child(3) { animation-delay: .4s; }
+    @keyframes typing { 0%,60%,100%{opacity:.3;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)} }
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #ddd; border-radius: 3px; }
+  `;
+
+  render() {
+    const showTyping = this.status === 'busy' &&
+      !this.messages.some(m => m.type === 'agent' && m.streaming);
+    return html`
+      <div class="scroll" id="scroll">
+        <div class="inner">
+          ${this.messages.map(msg => this._renderMsg(msg))}
+          ${showTyping ? html`
+            <div class="typing">
+              <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  _renderMsg(msg) {
+    switch (msg.type) {
+      case 'user':
+        return html`<acp-message role="user" .text=${msg.text}></acp-message>`;
+      case 'agent':
+        return html`<acp-message role="agent" .text=${msg.text} ?streaming=${msg.streaming}></acp-message>`;
+      case 'thinking':
+        return html`<acp-thinking .text=${msg.text} ?streaming=${msg.streaming}></acp-thinking>`;
+      case 'tool':
+        return html`<acp-tool-call .title=${msg.title} .kind=${msg.kind} .status=${msg.status}></acp-tool-call>`;
+      case 'permission':
+        return html`<acp-permission
+          request-id=${msg.requestId}
+          .toolCall=${msg.toolCall}
+          .options=${msg.options}
+          ?resolved=${msg.resolved}
+        ></acp-permission>`;
+      case 'system':
+        return html`<acp-system-notice .text=${msg.text}></acp-system-notice>`;
+      default:
+        return '';
+    }
+  }
+
+  updated() {
+    const scroll = this.renderRoot.querySelector('#scroll');
+    if (scroll) {
+      requestAnimationFrame(() => { scroll.scrollTop = scroll.scrollHeight; });
+    }
+  }
+}
+customElements.define('acp-chat', AcpChat);
