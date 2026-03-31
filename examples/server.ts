@@ -43,10 +43,17 @@ const app = createServer(runtime, {
   workspace: WORKSPACE,
 });
 
-// Serve Web UI at root (public — skips auth via publicPaths in createServer)
+// Serve Web UI files (public — skips auth via publicPaths in createServer)
 app.get('/', (c) => {
-  const html = readFileSync(join(__dirname, 'client.html'), 'utf-8');
-  return c.html(html);
+  return c.html(readFileSync(join(__dirname, 'index.html'), 'utf-8'));
+});
+app.get('/acp-client.js', (c) => {
+  c.header('Content-Type', 'application/javascript');
+  return c.body(readFileSync(join(__dirname, 'acp-client.js'), 'utf-8'));
+});
+app.get('/acp-components.js', (c) => {
+  c.header('Content-Type', 'application/javascript');
+  return c.body(readFileSync(join(__dirname, 'acp-components.js'), 'utf-8'));
 });
 
 const PORT = Number(process.env.PORT ?? 3000);

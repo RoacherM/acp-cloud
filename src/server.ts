@@ -91,7 +91,7 @@ export function createServer(runtime: CloudRuntime, opts?: ServerOptions): Hono 
   if (opts?.apiKey) {
     const expectedToken = opts.apiKey;
     app.use('*', async (c, next) => {
-      if (publicPaths.has(c.req.path)) return next();
+      if (publicPaths.has(c.req.path) || /\.(js|css|png|svg|ico)$/.test(c.req.path)) return next();
       const auth = c.req.header('Authorization');
       if (auth !== `Bearer ${expectedToken}`) {
         return c.json({ error: 'Unauthorized' }, 401);
